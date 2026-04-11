@@ -5,6 +5,7 @@
 This document separates the current repo state from the planned delivery phases.
 
 - `architecture.md`, `flows.md`, and `implementation-plan.md` define the Phase 1 build only.
+- `phase-1-5-draft-streaming.md` defines the planned Phase 1.5 draft-streaming enhancement only.
 - This roadmap tracks the broader direction, especially the later Google Gemini / Vertex AI media-generation work.
 
 ## Current Phase
@@ -29,16 +30,18 @@ As of 2026-04-11, this repository contains the Phase 1 implementation and its fi
 - SQLite-backed conversation memory, command handling, allowlist checks, and text plus single-image inbound normalization are implemented.
 - Tests exist under `tests/` for health/readiness behavior, normalization, allowlist handling, memory reuse, and reset semantics.
 - The current Phase 1 design still assumes text-only outbound replies.
+- Telegram partial-reply draft streaming is planned as Phase 1.5 work and is not current repo behavior.
 
 ## Recommended Sequencing
 
 Build this in order:
 
 1. Land the smallest end-to-end bot first.
-2. Add generated image output next.
-3. Add generated video output only after image generation works.
+2. Add partial reply streaming with Telegram drafts next.
+3. Add generated image output after draft streaming works.
+4. Add generated video output only after image generation works.
 
-This ordering keeps the first milestone synchronous and small, then introduces richer media in steps.
+This ordering keeps the first milestone small, then improves reply UX before introducing richer media.
 
 ## Phase 1 - Foundation
 
@@ -77,6 +80,48 @@ Phase 1 is done when:
 - conversation memory survives restart
 - unsupported messages fail safely
 - `/reset` starts a fresh conversation without deleting prior history
+
+## Phase 1.5 - Telegram Partial Reply Streaming
+
+Status: `not_started`
+
+Dedicated planning doc: [phase-1-5-draft-streaming.md](phase-1-5-draft-streaming.md)
+
+### Goal
+
+Let the bot show partial assistant text in Telegram while a long reply is still being generated.
+
+### Proposed Scope
+
+- use Telegram Bot API `sendMessageDraft` for partial reply updates
+- keep the final assistant response as a normal text message
+- add provider-side text streaming for the existing OpenAI path
+- keep partial draft state in memory only
+- degrade safely to final-only replies when draft streaming fails
+
+### Design Notes
+
+- Telegram documents `sendMessageDraft` for target private chats, which fits the current private-bot scope.
+- `aiogram` already exposes `sendMessageDraft`, so the main work is service orchestration rather than framework patching.
+- The Bot API docs describe how to send draft updates, but the final cleanup behavior still needs real-client validation.
+- This is a UX enhancement and should not expand supported input or output types.
+
+### New Decisions Needed
+
+- whether Phase 1.5 should stream only text-input replies first or also image-understanding replies
+- how aggressively draft updates should be throttled
+- whether formatting entities should be allowed in draft text on the first rollout
+- how to handle a new incoming user message while an older response is still streaming
+
+### Exit Criteria
+
+Phase 1.5 is done when:
+
+- an allowed private-chat user can see partial assistant text for a long-running reply
+- the final assistant reply still arrives as a normal Telegram text message
+- draft-send failures fall back cleanly to the Phase 1 final-only path
+- no partial draft text is persisted in SQLite
+- real Telegram clients confirm the draft disappears cleanly after final handoff
 
 ## Phase 2 - Vertex Image Generation
 
@@ -177,15 +222,19 @@ After the foundation and media-generation phases work, the next layer is operati
 These choices should be made before coding gets too far:
 
 1. Phase 1 stays narrow and ships before any Vertex work.
-2. Image generation comes before video generation.
-3. Video generation uses an asynchronous job model from the start.
-4. Telegram-specific code stays separate from provider and asset-management code.
+2. Telegram partial reply streaming lands before generated media.
+3. Image generation comes before video generation.
+4. Video generation uses an asynchronous job model from the start.
+5. Telegram-specific code stays separate from provider and asset-management code.
 
 ## Planning References
 
 - Telegram bots overview: https://core.telegram.org/bots
 - Telegram Bot API: https://core.telegram.org/bots/api
+- Telegram Bot API `sendMessageDraft`: https://core.telegram.org/bots/api#sendmessagedraft
+- Telegram message drafts overview: https://core.telegram.org/api/drafts
 - aiogram API docs: https://docs.aiogram.dev/en/latest/api/index.html
+- aiogram `sendMessageDraft`: https://docs.aiogram.dev/en/latest/api/methods/send_message_draft.html
 - Vertex AI Gemini image generation: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/image-generation
 - Vertex AI Veo overview: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/video/overview
 - Google Gen AI Python SDK: https://googleapis.github.io/python-genai/

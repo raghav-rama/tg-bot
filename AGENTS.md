@@ -10,6 +10,7 @@ Before making implementation decisions, read the local planning docs:
 - `docs/architecture.md`
 - `docs/flows.md`
 - `docs/implementation-plan.md`
+- `docs/phase-1-5-draft-streaming.md` when working on Telegram partial-reply streaming
 
 Use `docs/roadmap.md` as the source of truth for:
 
@@ -17,7 +18,7 @@ Use `docs/roadmap.md` as the source of truth for:
 - whether a feature is current scope or planned scope
 - the exit criteria that define when the repo should move to the next phase
 
-The current repo plan is Phase 1 first, with Google Gemini / Vertex AI image and video generation deferred to later roadmap phases.
+The current repo plan is Phase 1 first, then Phase 1.5 Telegram draft streaming, with Google Gemini / Vertex AI image and video generation deferred to later roadmap phases.
 
 ## Current State
 
@@ -27,6 +28,7 @@ As of `2026-04-11`, the repository is no longer docs-only.
 - Project metadata and dependency definitions exist in `pyproject.toml` and `uv.lock`.
 - Automated tests exist under `tests/` for health/readiness behavior, Telegram normalization, allowlist handling, history reuse, and reset semantics.
 - Live Telegram/OpenAI verification still depends on real environment variables and a manual runtime check.
+- Phase 1.5 planning now exists in `docs/phase-1-5-draft-streaming.md`, but the feature is not implemented yet.
 
 ## Telegram Documentation
 
