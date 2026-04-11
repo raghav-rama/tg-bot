@@ -8,6 +8,7 @@ from aiogram.types import Message, Update
 from app.config import Settings
 from app.domain.services import ChatService
 from app.logging import log_kv
+from app.telegram.drafts import TelegramResponseEmitter
 from app.telegram.media import download_largest_photo_bytes
 from app.telegram.normalizer import normalize_message
 
@@ -40,7 +41,6 @@ class TelegramUpdateProcessor:
                 image_bytes=image_bytes,
                 image_max_bytes=self.settings.bot_image_max_bytes,
             )
-            reply = await self.chat_service.handle_inbound(inbound)
         except Exception as exc:
             reply = await self.chat_service.handle_normalization_error(
                 update_id=update_id,
@@ -49,16 +49,21 @@ class TelegramUpdateProcessor:
                 telegram_message_id=message.message_id,
                 error=exc,
             )
+            await bot.send_message(chat_id=message.chat.id, text=reply.text)
+            return
 
-        await bot.send_message(chat_id=message.chat.id, text=reply.text)
-        self.logger.info(
-            log_kv(
-                "telegram_reply_sent",
-                update_id=update_id,
-                chat_id=message.chat.id,
-                user_id=message.from_user.id,
+        responder = TelegramResponseEmitter(bot=bot, chat_id=message.chat.id)
+        reply = await self.chat_service.handle_inbound(inbound, responder=responder)
+
+        if reply.delivered:
+            self.logger.info(
+                log_kv(
+                    "telegram_reply_sent",
+                    update_id=update_id,
+                    chat_id=message.chat.id,
+                    user_id=message.from_user.id,
+                )
             )
-        )
 
 
 def build_router(processor: TelegramUpdateProcessor) -> Router:
@@ -77,4 +82,3 @@ def build_router(processor: TelegramUpdateProcessor) -> Router:
         )
 
     return router
-

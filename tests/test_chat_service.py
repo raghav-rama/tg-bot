@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from app.domain.commands import ACCESS_DENIED_TEXT
-from app.domain.models import InboundMessage
-
+import asyncio
 from datetime import datetime, timezone
+
+from app.config import Settings
+from app.domain.commands import ACCESS_DENIED_TEXT
+from app.domain.errors import ProviderTimeoutError
+from app.domain.models import ImageInput, InboundMessage, StreamingProviderEvent
 
 
 def utc_datetime() -> datetime:
@@ -15,6 +18,7 @@ def make_text_message(*, user_id: int, chat_id: int, text: str, update_id: int =
         update_id=update_id,
         telegram_message_id=update_id,
         chat_id=chat_id,
+        chat_type="private",
         user_id=user_id,
         username="ritz",
         first_name="Ritz",
@@ -31,6 +35,7 @@ def make_command_message(*, user_id: int, chat_id: int, command: str, update_id:
         update_id=update_id,
         telegram_message_id=update_id,
         chat_id=chat_id,
+        chat_type="private",
         user_id=user_id,
         username="ritz",
         first_name="Ritz",
@@ -40,6 +45,102 @@ def make_command_message(*, user_id: int, chat_id: int, command: str, update_id:
         image=None,
         sent_at=utc_datetime(),
     )
+
+
+def make_image_message(
+    *,
+    user_id: int,
+    chat_id: int,
+    caption: str | None,
+    update_id: int = 1,
+) -> InboundMessage:
+    return InboundMessage(
+        update_id=update_id,
+        telegram_message_id=update_id,
+        chat_id=chat_id,
+        chat_type="private",
+        user_id=user_id,
+        username="ritz",
+        first_name="Ritz",
+        message_type="image",
+        text=caption,
+        command=None,
+        image=ImageInput(
+            telegram_file_id="file-1",
+            telegram_file_unique_id="uniq-1",
+            mime_type="image/jpeg",
+            width=512,
+            height=512,
+            byte_size=8,
+            bytes_b64="aW1hZ2U=",
+            caption=caption,
+        ),
+        sent_at=utc_datetime(),
+    )
+
+
+class FakeDraftSession:
+    def __init__(
+        self,
+        *,
+        draft_id: int = 1,
+        fail_on_update: bool = False,
+        updated_event: asyncio.Event | None = None,
+    ) -> None:
+        self.draft_id = draft_id
+        self.fail_on_update = fail_on_update
+        self.updated_event = updated_event
+        self.updates: list[str] = []
+        self.finished = False
+        self.cancelled = False
+
+    async def update(self, text: str) -> None:
+        if self.fail_on_update:
+            raise RuntimeError("draft update failed")
+        self.updates.append(text)
+        if self.updated_event is not None:
+            self.updated_event.set()
+
+    async def finish(self) -> None:
+        self.finished = True
+
+    async def cancel(self) -> None:
+        self.cancelled = True
+
+
+class FakeResponseEmitter:
+    def __init__(self, *, draft_session: FakeDraftSession | None = None) -> None:
+        self.sent_texts: list[str] = []
+        self.draft_session = draft_session or FakeDraftSession()
+        self.open_calls = 0
+
+    async def send_text(self, text: str) -> None:
+        self.sent_texts.append(text)
+
+    async def open_draft(self) -> FakeDraftSession:
+        self.open_calls += 1
+        return self.draft_session
+
+
+class PlannedProvider:
+    def __init__(self, plans: list[list[object]]) -> None:
+        self.plans = plans
+        self.calls = []
+
+    async def stream_response(self, request):
+        self.calls.append(request)
+        plan = self.plans[len(self.calls) - 1]
+        for step in plan:
+            if isinstance(step, asyncio.Event):
+                await step.wait()
+                continue
+            yield step
+
+    async def generate_response(self, request):
+        raise NotImplementedError
+
+    async def close(self) -> None:
+        return None
 
 
 async def test_allowlist_rejection_prevents_provider_invocation(service_bundle) -> None:
@@ -116,3 +217,213 @@ async def test_reset_starts_fresh_conversation_without_deleting_prior_history(se
     assert archived_row["count"] == 1
     assert len(first_messages) == 2
     assert len(second_messages) == 4
+
+
+async def test_text_message_streams_drafts_and_delivers_final_reply(service_bundle) -> None:
+    service = service_bundle["service"]
+    provider = service_bundle["provider"]
+    emitter = FakeResponseEmitter()
+
+    service.settings.bot_draft_start_delay_ms = 0
+    service.settings.bot_draft_update_interval_ms = 0
+    service.settings.bot_draft_min_chars_delta = 1
+    provider.events = [
+        StreamingProviderEvent(type="delta", text="assistant"),
+        StreamingProviderEvent(type="delta", text=" reply"),
+        StreamingProviderEvent(
+            type="completed",
+            provider_message_id="resp_stream",
+            input_tokens=10,
+            output_tokens=20,
+            finish_reason="completed",
+            raw_model=service.settings.openai_model,
+        ),
+    ]
+
+    reply = await service.handle_inbound(
+        make_text_message(user_id=42, chat_id=300, text="stream this"),
+        responder=emitter,
+    )
+
+    assert reply.text == "assistant reply"
+    assert reply.delivered is True
+    assert emitter.sent_texts == ["assistant reply"]
+    assert emitter.open_calls == 1
+    assert emitter.draft_session.updates == ["assistant", "assistant reply"]
+    assert emitter.draft_session.finished is True
+    assert emitter.draft_session.cancelled is False
+
+
+async def test_draft_update_failure_falls_back_to_final_only_reply(service_bundle) -> None:
+    service = service_bundle["service"]
+    provider = service_bundle["provider"]
+    emitter = FakeResponseEmitter(
+        draft_session=FakeDraftSession(fail_on_update=True)
+    )
+
+    service.settings.bot_draft_start_delay_ms = 0
+    service.settings.bot_draft_update_interval_ms = 0
+    service.settings.bot_draft_min_chars_delta = 1
+    provider.events = [
+        StreamingProviderEvent(type="delta", text="assistant"),
+        StreamingProviderEvent(type="delta", text=" reply"),
+        StreamingProviderEvent(
+            type="completed",
+            provider_message_id="resp_stream",
+            input_tokens=10,
+            output_tokens=20,
+            finish_reason="completed",
+            raw_model=service.settings.openai_model,
+        ),
+    ]
+
+    reply = await service.handle_inbound(
+        make_text_message(user_id=42, chat_id=301, text="stream this"),
+        responder=emitter,
+    )
+
+    assert reply.text == "assistant reply"
+    assert reply.delivered is True
+    assert emitter.sent_texts == ["assistant reply"]
+    assert emitter.open_calls == 1
+    assert emitter.draft_session.cancelled is True
+    assert emitter.draft_session.finished is False
+
+
+async def test_image_messages_skip_drafts_by_default(service_bundle) -> None:
+    service = service_bundle["service"]
+    emitter = FakeResponseEmitter()
+
+    service.settings.bot_draft_start_delay_ms = 0
+    service.settings.bot_draft_update_interval_ms = 0
+    service.settings.bot_draft_min_chars_delta = 1
+
+    reply = await service.handle_inbound(
+        make_image_message(
+            user_id=42,
+            chat_id=302,
+            caption="describe this",
+            update_id=10,
+        ),
+        responder=emitter,
+    )
+
+    assert reply.text == "assistant reply"
+    assert reply.delivered is True
+    assert emitter.sent_texts == ["assistant reply"]
+    assert emitter.open_calls == 0
+    assert emitter.draft_session.updates == []
+
+
+async def test_provider_failure_persists_user_turn_without_assistant_reply(service_bundle) -> None:
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    messages = service_bundle["messages"]
+    provider = service_bundle["provider"]
+
+    provider.error = ProviderTimeoutError("timed out")
+
+    reply = await service.handle_inbound(
+        make_text_message(user_id=42, chat_id=303, text="will fail"),
+    )
+    conversation = await conversations.get_active(303)
+
+    assert reply.text.startswith("I couldn't get a response")
+    assert conversation is not None
+
+    stored_messages = await messages.list_for_conversation(conversation.id)
+    assert [message.role for message in stored_messages] == ["user"]
+    assert stored_messages[0].text == "will fail"
+
+
+async def test_newer_message_supersedes_older_streaming_reply(tmp_path) -> None:
+    from app.domain.services import ChatService
+    from app.storage.conversations import ConversationRepository
+    from app.storage.db import Database
+    from app.storage.messages import MessageRepository
+
+    gate = asyncio.Event()
+    provider = PlannedProvider(
+        plans=[
+            [
+                StreamingProviderEvent(type="delta", text="old"),
+                gate,
+                StreamingProviderEvent(type="delta", text=" reply"),
+                StreamingProviderEvent(
+                    type="completed",
+                    provider_message_id="resp_old",
+                    finish_reason="completed",
+                    raw_model="gpt-4.1-mini",
+                ),
+            ],
+            [
+                StreamingProviderEvent(type="delta", text="new reply"),
+                StreamingProviderEvent(
+                    type="completed",
+                    provider_message_id="resp_new",
+                    finish_reason="completed",
+                    raw_model="gpt-4.1-mini",
+                ),
+            ],
+        ]
+    )
+    settings = Settings(
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        SQLITE_PATH=str(tmp_path / "supersede.db"),
+        OPENAI_MODEL="gpt-4.1-mini",
+        BOT_ENABLE_MESSAGE_DRAFTS="true",
+        BOT_DRAFT_START_DELAY_MS="0",
+        BOT_DRAFT_UPDATE_INTERVAL_MS="0",
+        BOT_DRAFT_MIN_CHARS_DELTA="1",
+    )
+    database = Database(settings.sqlite_path)
+    await database.connect()
+    await database.initialize()
+
+    conversations = ConversationRepository(database)
+    messages = MessageRepository(database)
+    service = ChatService(
+        settings=settings,
+        conversations=conversations,
+        messages=messages,
+        provider=provider,
+    )
+
+    first_draft_updated = asyncio.Event()
+    first_emitter = FakeResponseEmitter(
+        draft_session=FakeDraftSession(draft_id=11, updated_event=first_draft_updated)
+    )
+    second_emitter = FakeResponseEmitter(draft_session=FakeDraftSession(draft_id=22))
+
+    first_task = asyncio.create_task(
+        service.handle_inbound(
+            make_text_message(user_id=42, chat_id=304, text="first", update_id=1),
+            responder=first_emitter,
+        )
+    )
+    await first_draft_updated.wait()
+    second_reply = await service.handle_inbound(
+        make_text_message(user_id=42, chat_id=304, text="second", update_id=2),
+        responder=second_emitter,
+    )
+    gate.set()
+    first_reply = await first_task
+
+    conversation = await conversations.get_active(304)
+    assert conversation is not None
+    stored_messages = await messages.list_for_conversation(conversation.id)
+
+    assert first_reply.suppressed is True
+    assert first_reply.delivered is False
+    assert first_emitter.sent_texts == []
+    assert first_emitter.draft_session.cancelled is True
+    assert second_reply.text == "new reply"
+    assert second_reply.delivered is True
+    assert second_emitter.sent_texts == ["new reply"]
+    assert [message.role for message in stored_messages] == ["user", "user", "assistant"]
+    assert stored_messages[-1].text == "new reply"
+
+    await database.close()

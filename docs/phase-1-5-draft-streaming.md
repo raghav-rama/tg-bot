@@ -39,6 +39,11 @@ Related Telegram draft semantics from the broader Telegram API:
 
 Improve perceived latency for long-running text replies without changing the final Phase 1 behavior.
 
+Current rollout decision:
+
+- stream private text-input replies first
+- keep image-understanding requests on the final-only path unless explicitly enabled later
+
 ## In Scope
 
 - partial text updates sent with `sendMessageDraft`
@@ -157,10 +162,10 @@ Start Phase 1.5 with these eligibility rules:
 
 - allowed users only
 - private chats only
-- normal chat messages only
+- text chat messages on the first rollout
 - final outbound content is text
 
-Image-plus-caption requests may still qualify because the final response remains text-only, but this should be an explicit toggle in implementation rather than an assumption.
+Image-plus-caption requests may still qualify because the final response remains text-only, but this should stay behind an explicit implementation toggle rather than becoming the default assumption.
 
 ### Draft start threshold
 
@@ -253,6 +258,7 @@ If the process restarts mid-response:
 Recommended Phase 1.5 settings:
 
 - `BOT_ENABLE_MESSAGE_DRAFTS`
+- `BOT_DRAFT_STREAM_ON_IMAGES`
 - `BOT_DRAFT_START_DELAY_MS`
 - `BOT_DRAFT_UPDATE_INTERVAL_MS`
 - `BOT_DRAFT_MIN_CHARS_DELTA`

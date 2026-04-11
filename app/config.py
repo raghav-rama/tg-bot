@@ -47,6 +47,26 @@ class Settings(BaseSettings):
         default=10 * 1024 * 1024,
         alias="BOT_IMAGE_MAX_BYTES",
     )
+    bot_enable_message_drafts: bool = Field(
+        default=True,
+        alias="BOT_ENABLE_MESSAGE_DRAFTS",
+    )
+    bot_draft_stream_on_images: bool = Field(
+        default=False,
+        alias="BOT_DRAFT_STREAM_ON_IMAGES",
+    )
+    bot_draft_start_delay_ms: int = Field(
+        default=750,
+        alias="BOT_DRAFT_START_DELAY_MS",
+    )
+    bot_draft_update_interval_ms: int = Field(
+        default=350,
+        alias="BOT_DRAFT_UPDATE_INTERVAL_MS",
+    )
+    bot_draft_min_chars_delta: int = Field(
+        default=30,
+        alias="BOT_DRAFT_MIN_CHARS_DELTA",
+    )
 
     @field_validator("app_update_mode")
     @classmethod
@@ -70,6 +90,17 @@ class Settings(BaseSettings):
         for part in parts:
             int(part)
         return ",".join(parts)
+
+    @field_validator(
+        "bot_draft_start_delay_ms",
+        "bot_draft_update_interval_ms",
+        "bot_draft_min_chars_delta",
+    )
+    @classmethod
+    def validate_non_negative_ints(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("draft streaming settings must be zero or greater")
+        return value
 
     @property
     def allowed_user_ids(self) -> set[int]:

@@ -6,6 +6,7 @@ from typing import Literal
 
 MessageType = Literal["text", "image", "command"]
 Role = Literal["user", "assistant"]
+ChatType = Literal["private", "group", "supergroup", "channel"]
 
 
 @dataclass(slots=True)
@@ -25,6 +26,7 @@ class MessageContext:
     update_id: int
     telegram_message_id: int
     chat_id: int
+    chat_type: ChatType
     user_id: int
     username: str | None
     first_name: str | None
@@ -36,6 +38,7 @@ class InboundMessage:
     update_id: int
     telegram_message_id: int
     chat_id: int
+    chat_type: ChatType
     user_id: int
     username: str | None
     first_name: str | None
@@ -50,6 +53,7 @@ class InboundMessage:
             update_id=self.update_id,
             telegram_message_id=self.telegram_message_id,
             chat_id=self.chat_id,
+            chat_type=self.chat_type,
             user_id=self.user_id,
             username=self.username,
             first_name=self.first_name,
@@ -88,6 +92,17 @@ class ProviderResponse:
 
 
 @dataclass(slots=True)
+class StreamingProviderEvent:
+    type: Literal["delta", "completed"]
+    text: str | None = None
+    provider_message_id: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    finish_reason: str | None = None
+    raw_model: str | None = None
+
+
+@dataclass(slots=True)
 class ConversationRecord:
     id: int
     chat_id: int
@@ -118,4 +133,5 @@ class StoredMessage:
 class ServiceReply:
     text: str
     error_type: str | None = None
-
+    delivered: bool = False
+    suppressed: bool = False

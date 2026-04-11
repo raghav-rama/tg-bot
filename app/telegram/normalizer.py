@@ -37,6 +37,7 @@ def normalize_message(
                 update_id=update_id,
                 telegram_message_id=message.message_id,
                 chat_id=message.chat.id,
+                chat_type=message.chat.type,
                 user_id=message.from_user.id,
                 username=message.from_user.username,
                 first_name=message.from_user.first_name,
@@ -51,6 +52,7 @@ def normalize_message(
             update_id=update_id,
             telegram_message_id=message.message_id,
             chat_id=message.chat.id,
+            chat_type=message.chat.type,
             user_id=message.from_user.id,
             username=message.from_user.username,
             first_name=message.from_user.first_name,
@@ -74,6 +76,7 @@ def normalize_message(
             update_id=update_id,
             telegram_message_id=message.message_id,
             chat_id=message.chat.id,
+            chat_type=message.chat.type,
             user_id=message.from_user.id,
             username=message.from_user.username,
             first_name=message.from_user.first_name,
@@ -101,4 +104,3 @@ def _extract_command(text: str) -> str | None:
     if not token.startswith("/"):
         return None
     return token.split("@", maxsplit=1)[0].lower()
-

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Awaitable, Callable
 
 from app.config import Settings
 from app.domain.commands import (
@@ -17,8 +20,21 @@ from app.domain.commands import (
     render_start_message,
     render_status_message,
 )
-from app.domain.errors import ProviderTimeoutError, ProviderUpstreamError, StorageError, UnsupportedMessageError, ValidationError
-from app.domain.models import ConversationRecord, InboundMessage, ProviderRequest, ServiceReply
+from app.domain.errors import (
+    ProviderTimeoutError,
+    ProviderUpstreamError,
+    StorageError,
+    UnsupportedMessageError,
+    ValidationError,
+)
+from app.domain.interfaces import DraftSession, ResponseEmitter
+from app.domain.models import (
+    ConversationRecord,
+    InboundMessage,
+    ProviderRequest,
+    ServiceReply,
+    StreamingProviderEvent,
+)
 from app.logging import log_kv
 from app.providers.base import AIProvider
 from app.storage.conversations import ConversationRepository
@@ -27,6 +43,37 @@ from app.storage.messages import MessageRepository
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class _SupersededResponse(Exception):
+    """Raised when a newer message replaces the current in-flight response."""
+
+
+@dataclass(slots=True)
+class _ActiveRun:
+    cancelled: asyncio.Event = field(default_factory=asyncio.Event)
+    cancel_callbacks: list[Callable[[], Awaitable[None]]] = field(default_factory=list)
+
+    async def add_cancel_callback(
+        self,
+        callback: Callable[[], Awaitable[None]],
+    ) -> None:
+        if self.cancelled.is_set():
+            await callback()
+            return
+        self.cancel_callbacks.append(callback)
+
+    async def cancel(self) -> None:
+        if self.cancelled.is_set():
+            return
+        self.cancelled.set()
+        callbacks = list(self.cancel_callbacks)
+        self.cancel_callbacks.clear()
+        for callback in callbacks:
+            try:
+                await callback()
+            except Exception:
+                continue
 
 
 class ChatService:
@@ -43,9 +90,16 @@ class ChatService:
         self.messages = messages
         self.provider = provider
         self.logger = logging.getLogger("app.domain.services")
+        self._active_runs: dict[int, _ActiveRun] = {}
+        self._active_runs_lock = asyncio.Lock()
 
-    async def handle_inbound(self, message: InboundMessage) -> ServiceReply:
+    async def handle_inbound(
+        self,
+        message: InboundMessage,
+        responder: ResponseEmitter | None = None,
+    ) -> ServiceReply:
         started = time.perf_counter()
+
         if not self._is_allowed(message.user_id):
             self.logger.info(
                 log_kv(
@@ -56,67 +110,103 @@ class ChatService:
                     message_type=message.message_type,
                 )
             )
-            return ServiceReply(text=ACCESS_DENIED_TEXT, error_type="UnauthorizedUserError")
+            reply = ServiceReply(text=ACCESS_DENIED_TEXT, error_type="UnauthorizedUserError")
+            return await self._deliver_reply(
+                reply=reply,
+                responder=responder,
+                active_run=None,
+                message=message,
+            )
 
+        active_run = await self._begin_run(message.chat_id)
         try:
-            if message.message_type == "command":
-                reply_text = await self._handle_command(message)
-            else:
-                reply_text = await self._handle_chat_message(message)
-        except (ProviderTimeoutError, ProviderUpstreamError) as exc:
-            self.logger.warning(
-                log_kv(
-                    "provider_failure",
-                    update_id=message.update_id,
-                    chat_id=message.chat_id,
-                    user_id=message.user_id,
-                    message_type=message.message_type,
-                    provider="openai",
-                    model=self.settings.openai_model,
-                    error_type=type(exc).__name__,
+            try:
+                if message.message_type == "command":
+                    reply_text = await self._handle_command(message)
+                else:
+                    reply_text = await self._handle_chat_message(
+                        message,
+                        responder=responder,
+                        active_run=active_run,
+                    )
+                reply = ServiceReply(text=reply_text)
+            except _SupersededResponse:
+                self.logger.info(
+                    log_kv(
+                        "response_superseded",
+                        update_id=message.update_id,
+                        chat_id=message.chat_id,
+                        user_id=message.user_id,
+                        message_type=message.message_type,
+                    )
                 )
-            )
-            return ServiceReply(text=PROVIDER_RETRY_TEXT, error_type=type(exc).__name__)
-        except StorageError:
-            self.logger.exception(
-                log_kv(
-                    "storage_failure",
-                    update_id=message.update_id,
-                    chat_id=message.chat_id,
-                    user_id=message.user_id,
-                    message_type=message.message_type,
-                    error_type="StorageError",
+                return ServiceReply(text="", suppressed=True)
+            except (ProviderTimeoutError, ProviderUpstreamError) as exc:
+                self.logger.warning(
+                    log_kv(
+                        "provider_failure",
+                        update_id=message.update_id,
+                        chat_id=message.chat_id,
+                        user_id=message.user_id,
+                        message_type=message.message_type,
+                        provider="openai",
+                        model=self.settings.openai_model,
+                        error_type=type(exc).__name__,
+                    )
                 )
-            )
-            return ServiceReply(text=GENERIC_FAILURE_TEXT, error_type="StorageError")
-        except Exception:
-            self.logger.exception(
-                log_kv(
-                    "unhandled_service_failure",
-                    update_id=message.update_id,
-                    chat_id=message.chat_id,
-                    user_id=message.user_id,
-                    message_type=message.message_type,
-                    error_type="UnhandledError",
+                reply = ServiceReply(text=PROVIDER_RETRY_TEXT, error_type=type(exc).__name__)
+            except StorageError:
+                self.logger.exception(
+                    log_kv(
+                        "storage_failure",
+                        update_id=message.update_id,
+                        chat_id=message.chat_id,
+                        user_id=message.user_id,
+                        message_type=message.message_type,
+                        error_type="StorageError",
+                    )
                 )
-            )
-            return ServiceReply(text=GENERIC_FAILURE_TEXT, error_type="UnhandledError")
+                reply = ServiceReply(text=GENERIC_FAILURE_TEXT, error_type="StorageError")
+            except Exception:
+                self.logger.exception(
+                    log_kv(
+                        "unhandled_service_failure",
+                        update_id=message.update_id,
+                        chat_id=message.chat_id,
+                        user_id=message.user_id,
+                        message_type=message.message_type,
+                        error_type="UnhandledError",
+                    )
+                )
+                reply = ServiceReply(text=GENERIC_FAILURE_TEXT, error_type="UnhandledError")
 
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        self.logger.info(
-            log_kv(
-                "message_processed",
-                update_id=message.update_id,
-                chat_id=message.chat_id,
-                user_id=message.user_id,
-                command=message.command,
-                message_type=message.message_type,
-                provider="openai" if message.message_type != "command" else None,
-                model=self.settings.openai_model if message.message_type != "command" else None,
-                latency_ms=latency_ms,
+            reply = await self._deliver_reply(
+                reply=reply,
+                responder=responder,
+                active_run=active_run,
+                message=message,
             )
-        )
-        return ServiceReply(text=reply_text)
+            if reply.suppressed:
+                return reply
+
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            self.logger.info(
+                log_kv(
+                    "message_processed",
+                    update_id=message.update_id,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    command=message.command,
+                    message_type=message.message_type,
+                    provider="openai" if message.message_type != "command" else None,
+                    model=self.settings.openai_model if message.message_type != "command" else None,
+                    latency_ms=latency_ms,
+                    delivered=reply.delivered,
+                )
+            )
+            return reply
+        finally:
+            await self._finish_run(message.chat_id, active_run)
 
     async def handle_normalization_error(
         self,
@@ -162,6 +252,50 @@ class ChatService:
 
     def _is_allowed(self, user_id: int) -> bool:
         return user_id in self.settings.allowed_user_ids
+
+    async def _begin_run(self, chat_id: int) -> _ActiveRun:
+        new_run = _ActiveRun()
+        async with self._active_runs_lock:
+            previous_run = self._active_runs.get(chat_id)
+            self._active_runs[chat_id] = new_run
+        if previous_run is not None:
+            await previous_run.cancel()
+        return new_run
+
+    async def _finish_run(self, chat_id: int, active_run: _ActiveRun) -> None:
+        async with self._active_runs_lock:
+            current = self._active_runs.get(chat_id)
+            if current is active_run:
+                self._active_runs.pop(chat_id, None)
+
+    async def _deliver_reply(
+        self,
+        *,
+        reply: ServiceReply,
+        responder: ResponseEmitter | None,
+        active_run: _ActiveRun | None,
+        message: InboundMessage,
+    ) -> ServiceReply:
+        if reply.suppressed or responder is None:
+            return reply
+        if active_run is not None and active_run.cancelled.is_set():
+            self.logger.info(
+                log_kv(
+                    "response_delivery_suppressed",
+                    update_id=message.update_id,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    message_type=message.message_type,
+                )
+            )
+            return ServiceReply(
+                text="",
+                error_type=reply.error_type,
+                suppressed=True,
+            )
+        await responder.send_text(reply.text)
+        reply.delivered = True
+        return reply
 
     async def _handle_command(self, message: InboundMessage) -> str:
         command = (message.command or "").lower()
@@ -213,7 +347,13 @@ class ChatService:
         )
         await self.conversations.touch(conversation.id)
 
-    async def _handle_chat_message(self, message: InboundMessage) -> str:
+    async def _handle_chat_message(
+        self,
+        message: InboundMessage,
+        *,
+        responder: ResponseEmitter | None,
+        active_run: _ActiveRun,
+    ) -> str:
         conversation = await self.conversations.get_or_create_active(message.chat_id)
         history = []
         if self.settings.bot_history_max_turns > 0:
@@ -221,6 +361,15 @@ class ChatService:
                 conversation_id=conversation.id,
                 limit=self.settings.bot_history_max_turns,
             )
+
+        await self.messages.add_user_message(
+            conversation_id=conversation.id,
+            telegram_message_id=message.telegram_message_id,
+            message_type=message.message_type,
+            text=message.text,
+            image=message.image,
+            created_at=message.sent_at,
+        )
 
         request = ProviderRequest(
             chat_id=message.chat_id,
@@ -234,22 +383,250 @@ class ChatService:
             max_output_tokens=self.settings.openai_max_output_tokens,
         )
 
-        provider_response = await self.provider.generate_response(request)
-
-        await self.messages.add_user_message(
-            conversation_id=conversation.id,
-            telegram_message_id=message.telegram_message_id,
-            message_type=message.message_type,
-            text=message.text,
-            image=message.image,
-            created_at=message.sent_at,
+        draft_session: DraftSession | None = None
+        draft_updates_disabled = not self._drafts_enabled(
+            message=message,
+            responder=responder,
         )
-        await self.messages.add_assistant_message(
-            conversation_id=conversation.id,
-            provider_message_id=provider_response.provider_message_id,
-            text=provider_response.reply_text,
-            created_at=_utcnow(),
+        draft_delay_at = time.monotonic() + (
+            self.settings.bot_draft_start_delay_ms / 1000
         )
-        await self.conversations.touch(conversation.id)
-        return provider_response.reply_text
+        draft_last_sent_at = 0.0
+        draft_last_sent_len = 0
+        accumulated_text = ""
+        completion_event: StreamingProviderEvent | None = None
 
+        try:
+            async for event in self.provider.stream_response(request):
+                if active_run.cancelled.is_set():
+                    raise _SupersededResponse()
+
+                if event.type == "delta" and event.text:
+                    accumulated_text += event.text
+                    if draft_updates_disabled:
+                        continue
+
+                    now = time.monotonic()
+                    if draft_session is None:
+                        if now < draft_delay_at:
+                            continue
+                        draft_session = await self._open_draft_session(
+                            responder=responder,
+                            message=message,
+                            active_run=active_run,
+                        )
+                        if draft_session is None:
+                            draft_updates_disabled = True
+                            continue
+                        update_sent = await self._send_draft_update(
+                            draft_session=draft_session,
+                            text=accumulated_text,
+                            message=message,
+                        )
+                        if not update_sent:
+                            draft_updates_disabled = True
+                            await self._cancel_draft_session(
+                                draft_session=draft_session,
+                                message=message,
+                            )
+                            draft_session = None
+                            continue
+                        draft_last_sent_at = now
+                        draft_last_sent_len = len(accumulated_text)
+                        continue
+
+                    if (
+                        now - draft_last_sent_at
+                        < self.settings.bot_draft_update_interval_ms / 1000
+                    ):
+                        continue
+                    if (
+                        len(accumulated_text) - draft_last_sent_len
+                        < self.settings.bot_draft_min_chars_delta
+                    ):
+                        continue
+
+                    update_sent = await self._send_draft_update(
+                        draft_session=draft_session,
+                        text=accumulated_text,
+                        message=message,
+                    )
+                    if not update_sent:
+                        draft_updates_disabled = True
+                        await self._cancel_draft_session(
+                            draft_session=draft_session,
+                            message=message,
+                        )
+                        draft_session = None
+                        continue
+                    draft_last_sent_at = now
+                    draft_last_sent_len = len(accumulated_text)
+                    continue
+
+                if event.type == "completed":
+                    completion_event = event
+
+            if active_run.cancelled.is_set():
+                raise _SupersededResponse()
+
+            reply_text = accumulated_text.strip()
+            if not reply_text:
+                raise ProviderUpstreamError("OpenAI returned an empty response")
+
+            await self.messages.add_assistant_message(
+                conversation_id=conversation.id,
+                provider_message_id=(
+                    completion_event.provider_message_id if completion_event else None
+                ),
+                text=reply_text,
+                created_at=_utcnow(),
+            )
+            await self.conversations.touch(conversation.id)
+
+            if draft_session is not None:
+                await self._finish_draft_session(
+                    draft_session=draft_session,
+                    message=message,
+                )
+
+            return reply_text
+        except Exception:
+            if draft_session is not None:
+                await self._cancel_draft_session(
+                    draft_session=draft_session,
+                    message=message,
+                )
+            raise
+
+    def _drafts_enabled(
+        self,
+        *,
+        message: InboundMessage,
+        responder: ResponseEmitter | None,
+    ) -> bool:
+        if responder is None:
+            return False
+        if not self.settings.bot_enable_message_drafts:
+            return False
+        if message.chat_type != "private":
+            return False
+        if message.message_type == "text":
+            return True
+        if message.message_type == "image":
+            return self.settings.bot_draft_stream_on_images
+        return False
+
+    async def _open_draft_session(
+        self,
+        *,
+        responder: ResponseEmitter | None,
+        message: InboundMessage,
+        active_run: _ActiveRun,
+    ) -> DraftSession | None:
+        if responder is None:
+            return None
+        try:
+            draft_session = await responder.open_draft()
+        except Exception:
+            self.logger.warning(
+                log_kv(
+                    "draft_start_failed",
+                    update_id=message.update_id,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                ),
+                exc_info=True,
+            )
+            return None
+
+        async def cancel_draft() -> None:
+            await self._cancel_draft_session(
+                draft_session=draft_session,
+                message=message,
+            )
+
+        await active_run.add_cancel_callback(cancel_draft)
+        self.logger.info(
+            log_kv(
+                "draft_started",
+                update_id=message.update_id,
+                chat_id=message.chat_id,
+                user_id=message.user_id,
+                draft_id=draft_session.draft_id,
+            )
+        )
+        return draft_session
+
+    async def _send_draft_update(
+        self,
+        *,
+        draft_session: DraftSession,
+        text: str,
+        message: InboundMessage,
+    ) -> bool:
+        try:
+            await draft_session.update(text)
+        except Exception:
+            self.logger.warning(
+                log_kv(
+                    "draft_update_failed",
+                    update_id=message.update_id,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    draft_id=draft_session.draft_id,
+                ),
+                exc_info=True,
+            )
+            return False
+
+        self.logger.info(
+            log_kv(
+                "draft_updated",
+                update_id=message.update_id,
+                chat_id=message.chat_id,
+                user_id=message.user_id,
+                draft_id=draft_session.draft_id,
+                text_length=len(text),
+            )
+        )
+        return True
+
+    async def _finish_draft_session(
+        self,
+        *,
+        draft_session: DraftSession,
+        message: InboundMessage,
+    ) -> None:
+        try:
+            await draft_session.finish()
+        except Exception:
+            self.logger.warning(
+                log_kv(
+                    "draft_finish_failed",
+                    update_id=message.update_id,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    draft_id=draft_session.draft_id,
+                ),
+                exc_info=True,
+            )
+
+    async def _cancel_draft_session(
+        self,
+        *,
+        draft_session: DraftSession,
+        message: InboundMessage,
+    ) -> None:
+        try:
+            await draft_session.cancel()
+        except Exception:
+            self.logger.warning(
+                log_kv(
+                    "draft_cancel_failed",
+                    update_id=message.update_id,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    draft_id=draft_session.draft_id,
+                ),
+                exc_info=True,
+            )

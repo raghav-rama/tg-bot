@@ -10,27 +10,28 @@ This document separates the current repo state from the planned delivery phases.
 
 ## Current Phase
 
-- Active phase: `Phase 1 - Foundation`
+- Active phase: `Phase 1.5 - Telegram Partial Reply Streaming`
 - Status: `in_progress`
 - Last updated: `2026-04-11`
-- Exit criteria source: `Phase 1 - Foundation`
+- Exit criteria source: `Phase 1.5 - Telegram Partial Reply Streaming`
 - Evidence:
-  - planning docs exist and are aligned around Phase 1
-  - Phase 1 application code now exists under `app/` with tests under `tests/`
-  - automated checks cover normalization, allowlist behavior, memory reuse, reset semantics, and readiness behavior
-  - live Telegram/OpenAI runtime verification is still pending
+  - Phase 1 foundation work is accepted as complete for repo sequencing and no longer blocks the next milestone
+  - Phase 1.5 code now exists under `app/` for OpenAI streamed responses, Telegram draft delivery, and per-chat in-flight cancellation
+  - automated checks now cover draft streaming, draft fallback, supersession, provider-failure persistence, and the earlier Phase 1 behaviors
+  - live Telegram/OpenAI runtime verification is still pending, especially client confirmation that drafts disappear cleanly after final handoff
   - Google Gemini / Vertex AI media generation remains planned work, not current repo behavior
 
 ## Current State
 
-As of 2026-04-11, this repository contains the Phase 1 implementation and its first automated test suite.
+As of 2026-04-11, this repository contains the completed Phase 1 foundation plus an in-progress, text-first Phase 1.5 draft-streaming implementation.
 
 - Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, and the OpenAI adapter.
 - A polling-first runtime exists, while the webhook route remains reserved behind the same shared processing path.
 - SQLite-backed conversation memory, command handling, allowlist checks, and text plus single-image inbound normalization are implemented.
-- Tests exist under `tests/` for health/readiness behavior, normalization, allowlist handling, memory reuse, and reset semantics.
-- The current Phase 1 design still assumes text-only outbound replies.
-- Telegram partial-reply draft streaming is planned as Phase 1.5 work and is not current repo behavior.
+- OpenAI response streaming, in-memory Telegram draft sessions, and per-chat supersession handling now exist for Phase 1.5.
+- Draft streaming is currently enabled for private text chats; image-understanding requests remain on the final-only path by default.
+- Tests exist under `tests/` for health/readiness behavior, normalization, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, and supersession.
+- Real Telegram client validation of final draft cleanup is still pending.
 
 ## Recommended Sequencing
 
@@ -45,7 +46,7 @@ This ordering keeps the first milestone small, then improves reply UX before int
 
 ## Phase 1 - Foundation
 
-Status: `in_progress`
+Status: `complete`
 
 ### Goal
 
@@ -83,7 +84,7 @@ Phase 1 is done when:
 
 ## Phase 1.5 - Telegram Partial Reply Streaming
 
-Status: `not_started`
+Status: `in_progress`
 
 Dedicated planning doc: [phase-1-5-draft-streaming.md](phase-1-5-draft-streaming.md)
 
@@ -98,6 +99,7 @@ Let the bot show partial assistant text in Telegram while a long reply is still 
 - add provider-side text streaming for the existing OpenAI path
 - keep partial draft state in memory only
 - degrade safely to final-only replies when draft streaming fails
+- start with private text-input replies first; keep image-understanding replies on the final-only path unless widened later
 
 ### Design Notes
 
@@ -108,7 +110,7 @@ Let the bot show partial assistant text in Telegram while a long reply is still 
 
 ### New Decisions Needed
 
-- whether Phase 1.5 should stream only text-input replies first or also image-understanding replies
+- whether to widen Phase 1.5 beyond the current text-first rollout and stream image-understanding replies too
 - how aggressively draft updates should be throttled
 - whether formatting entities should be allowed in draft text on the first rollout
 - how to handle a new incoming user message while an older response is still streaming
