@@ -15,17 +15,20 @@ This document separates the current repo state from the planned delivery phases.
 - Exit criteria source: `Phase 1 - Foundation`
 - Evidence:
   - planning docs exist and are aligned around Phase 1
-  - application code has not been implemented yet
+  - Phase 1 application code now exists under `app/` with tests under `tests/`
+  - automated checks cover normalization, allowlist behavior, memory reuse, reset semantics, and readiness behavior
+  - live Telegram/OpenAI runtime verification is still pending
   - Google Gemini / Vertex AI media generation remains planned work, not current repo behavior
 
 ## Current State
 
-As of 2026-04-11, this repository contains planning docs only.
+As of 2026-04-11, this repository contains the Phase 1 implementation and its first automated test suite.
 
-- There is no application code yet under `app/`.
-- There is no Telegram runtime, database schema, provider adapter, or test suite implemented yet.
-- The existing planning docs describe a private polling-first bot with SQLite memory, OpenAI-backed replies, and text plus single-image inbound support.
-- The current Phase 1 design assumes text-only outbound replies.
+- Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, and the OpenAI adapter.
+- A polling-first runtime exists, while the webhook route remains reserved behind the same shared processing path.
+- SQLite-backed conversation memory, command handling, allowlist checks, and text plus single-image inbound normalization are implemented.
+- Tests exist under `tests/` for health/readiness behavior, normalization, allowlist handling, memory reuse, and reset semantics.
+- The current Phase 1 design still assumes text-only outbound replies.
 
 ## Recommended Sequencing
 

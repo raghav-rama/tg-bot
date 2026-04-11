@@ -19,6 +19,15 @@ Use `docs/roadmap.md` as the source of truth for:
 
 The current repo plan is Phase 1 first, with Google Gemini / Vertex AI image and video generation deferred to later roadmap phases.
 
+## Current State
+
+As of `2026-04-11`, the repository is no longer docs-only.
+
+- Phase 1 application code exists under `app/`.
+- Project metadata and dependency definitions exist in `pyproject.toml` and `uv.lock`.
+- Automated tests exist under `tests/` for health/readiness behavior, Telegram normalization, allowlist handling, history reuse, and reset semantics.
+- Live Telegram/OpenAI verification still depends on real environment variables and a manual runtime check.
+
 ## Telegram Documentation
 
 When working on Telegram bot integration, fetch current information from these sources first:
