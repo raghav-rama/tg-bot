@@ -1,25 +1,32 @@
-# Telegram Bot Architecture
+# Telegram Bot Architecture - Phase 1
 
 ## Summary
 
-This project is a private Telegram bot for a YouTube channel workflow. It accepts text and image messages from approved Telegram users, sends the request to OpenAI, stores conversation memory in SQLite, and returns an assistant reply back to Telegram.
+This document defines Phase 1 only.
+
+Phase 1 is a private Telegram bot for a YouTube channel workflow. It accepts text and image messages from approved Telegram users, sends the request to OpenAI, stores conversation memory in SQLite, and returns a text assistant reply back to Telegram.
 
 The service shell is `FastAPI`. The initial runtime mode is polling, but the application structure must keep Telegram ingestion separate from business logic so webhook delivery can be added later without rewriting handlers or provider code.
 
+Planned post-Phase-1 work, including Google Gemini / Vertex AI image and video generation, is tracked in [roadmap.md](roadmap.md).
+
 ## Goals
 
-- Ship a small, understandable v1.
+- Ship a small, understandable Phase 1.
 - Keep the bot private through a fixed allowlist.
 - Preserve per-chat memory across restarts.
 - Support text messages and single-image messages with optional captions.
-- Isolate OpenAI behind a narrow provider interface so another provider can be added later.
+- Isolate AI providers behind a narrow interface so the Phase 1 OpenAI path can be extended later without rewriting Telegram or storage code.
 
 ## Non-Goals
 
 - Public bot usage
 - Voice notes, video, files, stickers, or media groups
+- Generated image replies in Phase 1
+- Generated video replies in Phase 1
 - Admin panel or database-backed allowlist management
-- Multi-provider orchestration in v1
+- Google Gemini / Vertex AI integration in Phase 1
+- Multi-provider orchestration in Phase 1
 - Retrieval, search, or external workflow automation beyond reply generation
 
 ## Runtime Model
@@ -58,11 +65,13 @@ The service shell is `FastAPI`. The initial runtime mode is polling, but the app
 - persistence of user and assistant messages
 - mapping errors into safe user-facing replies
 
-`OpenAI provider adapter` is responsible for:
+`AI provider adapter` is responsible for:
 
-- translating internal request models into OpenAI API calls
+- translating internal request models into provider API calls
 - handling text-only and text-plus-image requests
 - returning normalized reply data and usage metadata
+
+Phase 1 has one concrete implementation: `OpenAIProvider`.
 
 `SQLite storage` is responsible for:
 
@@ -171,7 +180,8 @@ Notes:
 
 - `history` is reconstructed from SQLite.
 - `user_message` may be empty for pure image messages with no caption.
-- `image.bytes_b64` is passed to the provider adapter, which converts it into the OpenAI multimodal input format.
+- `image.bytes_b64` is passed to the Phase 1 provider adapter, which converts it into the OpenAI multimodal input format.
+- Later providers may reuse the same normalized image shape while mapping it to a different transport format.
 
 ### Provider response
 
@@ -184,6 +194,8 @@ class ProviderResponse(TypedDict):
     finish_reason: str | None
     raw_model: str | None
 ```
+
+Phase 1 keeps the provider response text-only. Future generated-media phases may widen this contract, but they are out of scope for this document.
 
 ### Command handling
 
@@ -263,12 +275,13 @@ Rules:
 - Commands are not sent to the provider.
 - `/reset` starts a new conversation and prevents older turns from being included in future context.
 
-## OpenAI Integration
+## Phase 1 Provider Integration
 
 ### Provider strategy
 
 - v1 implements only one concrete adapter: `OpenAIProvider`.
 - All Telegram and domain code depend on the provider interface, not the OpenAI SDK directly.
+- Google Gemini / Vertex AI work is deferred to later phases in [roadmap.md](roadmap.md).
 
 ### Request policy
 
@@ -310,6 +323,8 @@ Recommended variables:
 - `BOT_SYSTEM_PROMPT`
 - `BOT_HISTORY_MAX_TURNS`
 - `BOT_IMAGE_MAX_BYTES`
+
+Google / Vertex credentials are intentionally excluded from the Phase 1 environment contract.
 
 Defaults:
 

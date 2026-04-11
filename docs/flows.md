@@ -1,8 +1,12 @@
-# Telegram Bot Flows
+# Telegram Bot Flows - Phase 1
 
 ## Summary
 
-This document defines the runtime behavior for supported user actions, command handling, error paths, and the difference between polling and webhook ingestion. All flows end in the same normalized message pipeline so delivery mode does not affect business logic.
+This document defines the Phase 1 runtime behavior for supported user actions, command handling, error paths, and the difference between polling and webhook ingestion.
+
+All flows end in the same normalized message pipeline so delivery mode does not affect business logic.
+
+Planned post-Phase-1 flows, including Google Gemini / Vertex AI image and video generation, are tracked in [roadmap.md](roadmap.md).
 
 ## Core Processing Pipeline
 
@@ -18,6 +22,8 @@ Every accepted update follows this sequence:
 8. Call the provider adapter.
 9. Persist the user turn and assistant turn.
 10. Send the assistant reply back to Telegram.
+
+Phase 1 assumes a text reply back to Telegram even when the inbound message includes an image.
 
 ## Text Message Flow
 
@@ -71,6 +77,7 @@ An allowed user sends one image with an optional caption.
 - The image itself is not stored in SQLite.
 - The stored user row keeps only image metadata, not raw bytes.
 - A missing caption is allowed.
+- The outbound reply remains text-only in Phase 1.
 
 ## Unauthorized User Flow
 
@@ -234,3 +241,12 @@ Reject or short-circuit these cases before provider invocation:
 - unsupported Telegram payload types
 - messages from users outside the allowlist
 - malformed updates missing required identifiers
+
+## Deferred Flows
+
+The following flows are intentionally excluded from this document and are tracked in [roadmap.md](roadmap.md):
+
+- generated image replies
+- generated video replies
+- asynchronous generation jobs
+- Google Gemini / Vertex AI provider flows

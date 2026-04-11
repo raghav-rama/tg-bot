@@ -6,9 +6,18 @@ This repository is for a `Python + FastAPI` Telegram bot that sends user input t
 
 Before making implementation decisions, read the local planning docs:
 
+- `docs/roadmap.md`
 - `docs/architecture.md`
 - `docs/flows.md`
 - `docs/implementation-plan.md`
+
+Use `docs/roadmap.md` as the source of truth for:
+
+- the currently active phase
+- whether a feature is current scope or planned scope
+- the exit criteria that define when the repo should move to the next phase
+
+The current repo plan is Phase 1 first, with Google Gemini / Vertex AI image and video generation deferred to later roadmap phases.
 
 ## Telegram Documentation
 
@@ -30,6 +39,10 @@ If an unofficial tutorial conflicts with these sources, trust the official Teleg
 - Keep Telegram-specific logic separate from domain and provider logic.
 - Prefer polling-first implementation, while preserving a clean webhook path.
 - Treat text and single-image messages as the only supported v1 inputs unless the docs in this repo are updated.
+- Treat text replies as the only supported v1 outputs unless the docs in this repo are updated.
 - Keep the bot private via an allowlist unless requirements change.
+- Do not treat roadmap items as implementation requirements until their phase becomes active in `docs/roadmap.md`.
 - Use tavily fetching up-to-date info about anything.
 - Use context7 for fetching up-to-date documentation about any library or SDK.
+- Keep AGENTS.md file updated with the current state of the repo.
+- Always sign commits

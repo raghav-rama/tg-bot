@@ -1,8 +1,12 @@
-# Implementation Plan
+# Implementation Plan - Phase 1
 
 ## Summary
 
-This document translates the agreed architecture into a concrete build order for the code phase. The goal is to implement a private `Python + FastAPI` Telegram bot with SQLite-backed memory, OpenAI-backed replies, polling-first execution, and text plus single-image support.
+This document translates the agreed architecture into a concrete build order for Phase 1.
+
+The goal is to implement a private `Python + FastAPI` Telegram bot with SQLite-backed memory, OpenAI-backed replies, polling-first execution, and text plus single-image support.
+
+Later Google Gemini / Vertex AI image and video generation work is intentionally excluded from this plan and tracked in [roadmap.md](roadmap.md).
 
 ## Recommended Dependencies
 
@@ -15,6 +19,8 @@ Primary packages:
 - `pydantic-settings`
 - `aiosqlite`
 - `httpx`
+
+Phase 1 keeps the dependency set narrow. Google / Vertex SDK dependencies should be introduced in a later phase instead of being added up front here.
 
 Optional packages:
 
@@ -146,6 +152,8 @@ Recommended:
 - `BOT_HISTORY_MAX_TURNS`
 - `BOT_IMAGE_MAX_BYTES`
 
+Do not add Google / Vertex credentials to the Phase 1 environment contract. Those belong to a later phase from [roadmap.md](roadmap.md).
+
 ## Test Plan
 
 ### Unit tests
@@ -181,11 +189,15 @@ Recommended:
 - history window defaults to the last 20 turns
 - only text and single-image messages are supported
 - OpenAI is the only concrete provider in v1
+- outbound replies remain text-only in Phase 1
 
 ## Out of Scope for This Build
 
 - webhook production deployment
 - public bot exposure
+- generated image replies
+- generated video replies
+- Google Gemini / Vertex AI integration
 - voice transcription
 - media groups
 - admin interfaces
