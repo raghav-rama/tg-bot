@@ -28,6 +28,7 @@ As of `2026-04-12`, the repository is no longer docs-only. Phase 1, Phase 1.5, a
 
 - Phase 1 foundation code exists under `app/`.
 - Project metadata and dependency definitions exist in `pyproject.toml` and `uv.lock`.
+- Container build assets now exist through a repo-level `Dockerfile` and `.dockerignore`.
 - Phase 1.5 code exists for OpenAI streamed responses, Telegram draft delivery, Telegram-safe final-message formatting, and per-chat supersession handling.
 - Phase 2 code now exists for `/image <prompt>`, Vertex image generation through the Python `google-genai` SDK path, Telegram photo delivery, and SQLite persistence of generated-image metadata.
 - Phase 2 image generation now supports a Vertex API key for local testing and can still use ADC when needed.
