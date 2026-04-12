@@ -152,6 +152,7 @@ If Telegram video delivery fails:
 - keep the failed job visible in persistence
 - send a short user-safe failure message when possible
 - do not mark the job completed
+- log the concrete Telegram exception type and message so upload timeouts and API validation failures can be distinguished during debugging
 
 ## Environment Contract
 
@@ -162,12 +163,14 @@ Phase 3 keeps the earlier settings and adds:
 - `VERTEX_VIDEO_DURATION_SECONDS`
 - `VERTEX_VIDEO_OUTPUT_GCS_URI`
 - `BOT_VIDEO_MAX_BYTES`
+- `TELEGRAM_VIDEO_REQUEST_TIMEOUT_SECONDS`
 - `VIDEO_JOB_POLL_INTERVAL_SECONDS`
 
 Initial implementation notes:
 
 - `VERTEX_VIDEO_OUTPUT_GCS_URI` is optional; when omitted, the provider prefers inline video bytes returned by Vertex
 - when Vertex only returns a `gs://` asset URI, the provider can fetch the result later from Cloud Storage
+- Telegram video uploads should use a request timeout above the aiogram default `60s` when larger generated assets are expected, because Telegram may finish delivery after the client-side timeout window closes
 
 ## Exit Criteria
 

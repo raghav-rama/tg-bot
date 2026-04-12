@@ -63,9 +63,16 @@ class TelegramDraftSession:
 class TelegramResponseEmitter:
     _draft_ids = itertools.count(1)
 
-    def __init__(self, *, bot: Bot, chat_id: int) -> None:
+    def __init__(
+        self,
+        *,
+        bot: Bot,
+        chat_id: int,
+        video_request_timeout_seconds: int | None = None,
+    ) -> None:
         self.bot = bot
         self.chat_id = chat_id
+        self.video_request_timeout_seconds = video_request_timeout_seconds
         self.logger = logging.getLogger("app.telegram.drafts")
 
     async def send_text(self, text: str) -> None:
@@ -123,7 +130,11 @@ class TelegramResponseEmitter:
                 filename=f"generated{extension}",
             ),
             caption=video.caption,
+            duration=video.duration_seconds,
+            width=video.width,
+            height=video.height,
             supports_streaming=True,
+            request_timeout=self.video_request_timeout_seconds,
         )
         if message.video is None:
             raise RuntimeError("Telegram did not return video metadata for the sent video")

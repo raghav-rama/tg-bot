@@ -204,20 +204,42 @@ class VideoJobWorker:
                     job_id=job.id,
                     chat_id=job.chat_id,
                     operation_name=job.operation_name,
+                    mime_type=generated_video.mime_type,
+                    output_uri=generated_video.output_uri,
+                    duration_seconds=generated_video.duration_seconds,
+                    width=generated_video.width,
+                    height=generated_video.height,
                     file_size=video_size,
+                    request_timeout_seconds=(
+                        self.settings.telegram_video_request_timeout_seconds
+                    ),
                 )
             )
             sent_video = await emitter.send_video(generated_video)
-        except Exception:
+        except Exception as exc:
+            failure_reason = self._format_delivery_failure_reason(exc)
+            self.logger.exception(
+                log_kv(
+                    "video_job_delivery_exception",
+                    job_id=job.id,
+                    chat_id=job.chat_id,
+                    operation_name=job.operation_name,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                    request_timeout_seconds=(
+                        self.settings.telegram_video_request_timeout_seconds
+                    ),
+                )
+            )
             await self.generation_jobs.mark_failed(
                 job_id=job.id,
-                failure_reason="Telegram video delivery failed",
+                failure_reason=failure_reason,
             )
             await self._send_status_text(
                 job=job,
                 text=VIDEO_GENERATION_RETRY_TEXT,
                 log_event="video_delivery_failed",
-                log_reason="telegram_send_video_failed",
+                log_reason=failure_reason,
             )
             await self.conversations.touch(job.conversation_id)
             return
@@ -321,3 +343,8 @@ class VideoJobWorker:
                 reason=log_reason,
             )
         )
+
+    @staticmethod
+    def _format_delivery_failure_reason(exc: Exception) -> str:
+        reason = f"Telegram video delivery failed: {type(exc).__name__}: {exc}"
+        return reason[:500]

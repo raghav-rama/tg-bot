@@ -102,6 +102,10 @@ class Settings(BaseSettings):
         default=50 * 1024 * 1024,
         alias="BOT_VIDEO_MAX_BYTES",
     )
+    telegram_video_request_timeout_seconds: int = Field(
+        default=180,
+        alias="TELEGRAM_VIDEO_REQUEST_TIMEOUT_SECONDS",
+    )
     video_job_poll_interval_seconds: int = Field(
         default=15,
         alias="VIDEO_JOB_POLL_INTERVAL_SECONDS",
@@ -162,6 +166,7 @@ class Settings(BaseSettings):
     @field_validator(
         "vertex_video_duration_seconds",
         "bot_video_max_bytes",
+        "telegram_video_request_timeout_seconds",
         "video_job_poll_interval_seconds",
     )
     @classmethod

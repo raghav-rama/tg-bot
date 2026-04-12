@@ -21,6 +21,7 @@ def test_draft_streaming_defaults_are_conservative(tmp_path) -> None:
     assert settings.vertex_video_model == "veo-3.0-fast-generate-001"
     assert settings.vertex_video_duration_seconds == 4
     assert settings.bot_video_max_bytes == 50 * 1024 * 1024
+    assert settings.telegram_video_request_timeout_seconds == 180
     assert settings.video_job_poll_interval_seconds == 15
     assert settings.vertex_image_generation_enabled is False
     assert settings.vertex_video_generation_enabled is False

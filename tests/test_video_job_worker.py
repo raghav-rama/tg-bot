@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from aiogram.exceptions import TelegramNetworkError
+from aiogram.methods import SendVideo
+
 from app.domain.models import InboundMessage, SentPhoto, SentVideo, VideoJobPollResult
 from app.workers.video_jobs import VideoJobWorker
 
@@ -54,6 +57,14 @@ class RecordingEmitter:
 
     async def open_draft(self):
         raise AssertionError("open_draft should not be used in video job worker tests")
+
+
+class FailingVideoEmitter(RecordingEmitter):
+    async def send_video(self, video) -> SentVideo:
+        raise TelegramNetworkError(
+            method=SendVideo(chat_id=500, video="attach://video"),
+            message="Request timeout error",
+        )
 
 
 async def test_worker_completes_video_job_and_delivers_video(service_bundle) -> None:
@@ -186,3 +197,48 @@ async def test_worker_rejects_video_larger_than_telegram_limit(service_bundle) -
     ]
     assert stored_jobs[0].status == "failed"
     assert stored_jobs[0].failure_reason == "Generated video exceeded the Telegram size limit"
+
+
+async def test_worker_logs_and_persists_delivery_exception_details(
+    service_bundle,
+    caplog,
+) -> None:
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
+    settings = service_bundle["settings"]
+    video_generator = service_bundle["video_generator"]
+
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=503,
+            command="/video slow cinematic dolly shot through a rainy neon alley",
+            update_id=4,
+        )
+    )
+    conversation = await conversations.get_active(503)
+    assert conversation is not None
+
+    worker = VideoJobWorker(
+        settings=settings,
+        conversations=conversations,
+        messages=service_bundle["messages"],
+        generation_jobs=generation_jobs,
+        video_generator=video_generator,
+        emitter_factory=lambda _chat_id: FailingVideoEmitter(),
+    )
+
+    with caplog.at_level("INFO"):
+        await worker.run_once()
+
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+
+    assert stored_jobs[0].status == "failed"
+    assert (
+        stored_jobs[0].failure_reason
+        == "Telegram video delivery failed: TelegramNetworkError: HTTP Client says - Request timeout error"
+    )
+    assert "video_job_delivery_exception" in caplog.text
+    assert "error_type=TelegramNetworkError" in caplog.text
+    assert "Request timeout error" in caplog.text

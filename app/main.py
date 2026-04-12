@@ -129,6 +129,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     emitter_factory=lambda chat_id: TelegramResponseEmitter(
                         bot=telegram_runtime.bot,
                         chat_id=chat_id,
+                        video_request_timeout_seconds=(
+                            loaded_settings.telegram_video_request_timeout_seconds
+                        ),
                     ),
                 )
                 await video_job_worker.start()
