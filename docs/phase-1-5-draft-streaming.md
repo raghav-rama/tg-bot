@@ -27,6 +27,8 @@ The Phase 1.5 design should assume these currently documented facts:
 - `draft_id` must be non-zero, and updates with the same `draft_id` are animated.
 - `text` must remain within Telegram text limits after entity parsing.
 - `message_thread_id`, `parse_mode`, and `entities` are optional.
+- the normal `sendMessage` path and the draft path both support Telegram formatting through `parse_mode` or explicit entities
+- Telegram formatting modes are Telegram `HTML` or `MarkdownV2`; CommonMark or GitHub-style markdown is not a Bot API formatting contract
 - `aiogram` 3.27.0 exposes this method as `await bot.send_message_draft(...)`.
 
 Related Telegram draft semantics from the broader Telegram API:
@@ -200,6 +202,30 @@ When generation completes:
 
 Because the Bot API `sendMessageDraft` docs do not currently describe explicit draft cleanup behavior, the disappearance of the draft must be treated as an exit criterion, not an assumption.
 
+### Formatting rollout
+
+Phase 1.5 treats Telegram formatting as a transport concern rather than a provider concern.
+
+Problem this rollout addresses:
+
+- provider output can contain CommonMark or GitHub-style markdown such as `## heading` and `**bold**`
+- without Telegram-specific conversion, that text can arrive literally in chats
+
+Current rollout:
+
+- a Telegram-only formatter runs in the Telegram adapter layer before final outbound delivery
+- final assistant messages use Telegram `HTML`, not raw markdown and not provider-specific formatting assumptions
+- partial draft updates stay plain text on the current rollout, even though `sendMessageDraft` supports `parse_mode`
+- the first formatter pass converts a safe subset of common model output patterns, such as headings, bold, italic, numbered lists, bullet lists, inline code, fenced code, and links
+- unsupported or malformed markdown is flattened into readable plain text instead of risking a Telegram parse failure
+- if Telegram rejects the formatted final message, the bot retries the same content as plain text and logs the formatting failure
+
+Rationale for these choices:
+
+- `HTML` is easier to sanitize and less fragile than `MarkdownV2` escaping for model-generated text
+- draft text arrives incrementally, so attempting to parse partial markdown during streaming is likely to produce broken entities or noisy UX
+- transport-layer conversion preserves separation of concerns: the provider can keep returning plain text while Telegram delivery decides how to render it safely
+
 ## OpenAI Path
 
 The existing OpenAI adapter is a good fit for this phase because the Python SDK already supports streamed `Responses API` events.
@@ -237,6 +263,15 @@ If `sendMessageDraft` fails:
 - still attempt to send the final text reply normally
 
 This feature must be optional at runtime, not a single point of failure.
+
+### Final-message formatting failure
+
+If Telegram rejects a formatted final reply:
+
+- log the formatting failure with enough context to identify the chat and outbound path
+- resend the same final reply as plain text without Telegram formatting
+- keep persistence unchanged so the stored assistant text remains the canonical provider output
+- do not let formatting failure block final delivery
 
 ### Provider failure after draft start
 
@@ -318,7 +353,8 @@ Phase 1.5 is done when:
 - Does the Bot API final send path always clear or replace the visible draft in all Telegram clients, or is an extra cleanup step needed?
 - What practical `sendMessageDraft` cadence remains stable across real Telegram clients and chats beyond the current conservative defaults?
 - Should Phase 1.5 stream image-understanding replies immediately, or start with text-input replies only?
-- Should the first rollout keep draft text plain only, or allow formatted entities once cleanup and cadence are proven stable?
+- Does the first formatter pass cover the markdown patterns the model produces most often in real chats, or do we need to widen the supported conversion set?
+- Are there Telegram HTML edge cases in long replies that should force chunking or additional escaping rules?
 
 ## References
 

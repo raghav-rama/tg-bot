@@ -4,11 +4,13 @@ import itertools
 import logging
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramRetryAfter
+from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 
 from app.domain.errors import DraftRateLimitedError
 from app.domain.interfaces import DraftSession, ResponseEmitter
 from app.logging import log_kv
+from app.telegram.formatting import render_telegram_html
 
 
 class TelegramDraftSession:
@@ -62,9 +64,30 @@ class TelegramResponseEmitter:
     def __init__(self, *, bot: Bot, chat_id: int) -> None:
         self.bot = bot
         self.chat_id = chat_id
+        self.logger = logging.getLogger("app.telegram.drafts")
 
     async def send_text(self, text: str) -> None:
-        await self.bot.send_message(chat_id=self.chat_id, text=text)
+        formatted_text = render_telegram_html(text)
+        try:
+            await self.bot.send_message(
+                chat_id=self.chat_id,
+                text=formatted_text,
+                parse_mode=ParseMode.HTML,
+            )
+        except TelegramBadRequest as exc:
+            self.logger.warning(
+                log_kv(
+                    "telegram_formatted_send_fallback",
+                    chat_id=self.chat_id,
+                    error_type=type(exc).__name__,
+                    reason=str(exc),
+                )
+            )
+            await self.bot.send_message(
+                chat_id=self.chat_id,
+                text=text,
+                parse_mode=None,
+            )
 
     async def open_draft(self) -> DraftSession:
         draft_id = next(self._draft_ids)

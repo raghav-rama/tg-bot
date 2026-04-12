@@ -19,6 +19,7 @@ This document separates the current repo state from the planned delivery phases.
   - Phase 1.5 code now exists under `app/` for OpenAI streamed responses, Telegram draft delivery, and per-chat in-flight cancellation
   - automated checks now cover draft streaming, draft fallback, supersession, provider-failure persistence, and the earlier Phase 1 behaviors
   - live Telegram/OpenAI runtime verification found that aggressive `sendMessageDraft` updates can trigger per-chat flood control, so the repo now needs conservative default throttling
+  - a Telegram-specific final-message formatter now converts a safe subset of model markdown into Telegram HTML while draft updates remain plain text
   - client confirmation that drafts disappear cleanly after final handoff is still pending
   - Google Gemini / Vertex AI media generation remains planned work, not current repo behavior
 
@@ -31,6 +32,7 @@ As of 2026-04-11, this repository contains the completed Phase 1 foundation plus
 - SQLite-backed conversation memory, command handling, allowlist checks, and text plus single-image inbound normalization are implemented.
 - OpenAI response streaming, in-memory Telegram draft sessions, and per-chat supersession handling now exist for Phase 1.5.
 - Draft streaming is currently enabled for private text chats; image-understanding requests remain on the final-only path by default.
+- Final Telegram replies now normalize a safe subset of model markdown into Telegram-safe HTML, with a plain-text retry path if Telegram rejects the formatted message.
 - Tests exist under `tests/` for health/readiness behavior, normalization, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, explicit draft rate-limit fallback, provider cleanup, and supersession.
 - Real Telegram client validation of final draft cleanup is still pending.
 
@@ -107,14 +109,15 @@ Let the bot show partial assistant text in Telegram while a long reply is still 
 - Telegram documents `sendMessageDraft` for target private chats, which fits the current private-bot scope.
 - `aiogram` already exposes `sendMessageDraft`, so the main work is service orchestration rather than framework patching.
 - The Bot API docs describe how to send draft updates, but the final cleanup behavior still needs real-client validation.
+- Telegram formatting should be handled in the Telegram adapter: convert common model markdown to safe final-message HTML, keep drafts plain text first, and retry as plain text if Telegram rejects formatted output.
 - This is a UX enhancement and should not expand supported input or output types.
 
 ### New Decisions Needed
 
 - whether to widen Phase 1.5 beyond the current text-first rollout and stream image-understanding replies too
 - how aggressively draft updates should be throttled
-- whether formatting entities should be allowed in draft text on the first rollout
 - how to handle a new incoming user message while an older response is still streaming
+- whether the first Telegram formatter pass needs support beyond headings, emphasis, lists, code, and links
 
 ### Exit Criteria
 
