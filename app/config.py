@@ -60,11 +60,11 @@ class Settings(BaseSettings):
         alias="BOT_DRAFT_START_DELAY_MS",
     )
     bot_draft_update_interval_ms: int = Field(
-        default=350,
+        default=1200,
         alias="BOT_DRAFT_UPDATE_INTERVAL_MS",
     )
     bot_draft_min_chars_delta: int = Field(
-        default=30,
+        default=80,
         alias="BOT_DRAFT_MIN_CHARS_DELTA",
     )
 

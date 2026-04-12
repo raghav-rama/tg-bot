@@ -61,7 +61,7 @@ class OpenAIProvider:
             raise ProviderUpstreamError("OpenAI request failed") from exc
         finally:
             if stream is not None:
-                stream.close()
+                await stream.close()
 
         if not saw_terminal_event:
             raise ProviderUpstreamError("OpenAI stream ended without completion")

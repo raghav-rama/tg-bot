@@ -25,6 +25,17 @@ class ProviderUpstreamError(BotError):
     """Raised when the provider returns an upstream failure."""
 
 
+class DraftDeliveryError(BotError):
+    """Raised when a partial Telegram draft cannot be delivered."""
+
+
+class DraftRateLimitedError(DraftDeliveryError):
+    """Raised when Telegram rate limits partial draft delivery."""
+
+    def __init__(self, *, retry_after: int) -> None:
+        super().__init__(f"Draft delivery rate limited; retry after {retry_after} seconds")
+        self.retry_after = retry_after
+
+
 class StorageError(BotError):
     """Raised when SQLite operations fail."""
-

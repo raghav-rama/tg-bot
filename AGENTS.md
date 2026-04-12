@@ -22,13 +22,14 @@ The current repo plan is active Phase 1.5 Telegram draft streaming, with Google 
 
 ## Current State
 
-As of `2026-04-11`, the repository is no longer docs-only and Phase 1.5 work has started.
+As of `2026-04-12`, the repository is no longer docs-only and Phase 1.5 work has started.
 
 - Phase 1 foundation code exists under `app/`.
 - Project metadata and dependency definitions exist in `pyproject.toml` and `uv.lock`.
 - Phase 1.5 code now exists for OpenAI streamed responses, Telegram draft delivery, and per-chat supersession handling.
-- Automated tests exist under `tests/` for health/readiness behavior, Telegram normalization, allowlist handling, history reuse, reset semantics, draft streaming, draft fallback, and supersession.
+- Automated tests exist under `tests/` for health/readiness behavior, Telegram normalization, allowlist handling, history reuse, reset semantics, draft streaming, draft fallback, explicit draft rate-limit fallback, provider cleanup, and supersession.
 - Draft streaming currently targets private text chats first; image-understanding requests still use the final-only path by default.
+- Live Telegram/OpenAI verification found that aggressive `sendMessageDraft` cadences can hit per-chat flood control; safer defaults are now part of the Phase 1.5 implementation.
 - Live Telegram/OpenAI verification still depends on real environment variables and a manual runtime check, including client confirmation that drafts disappear cleanly after the final send.
 
 ## Telegram Documentation

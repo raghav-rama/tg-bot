@@ -21,6 +21,7 @@ from app.domain.commands import (
     render_status_message,
 )
 from app.domain.errors import (
+    DraftRateLimitedError,
     ProviderTimeoutError,
     ProviderUpstreamError,
     StorageError,
@@ -566,6 +567,19 @@ class ChatService:
     ) -> bool:
         try:
             await draft_session.update(text)
+        except DraftRateLimitedError as exc:
+            self.logger.warning(
+                log_kv(
+                    "draft_rate_limited",
+                    update_id=message.update_id,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    draft_id=draft_session.draft_id,
+                    retry_after=exc.retry_after,
+                ),
+                exc_info=True,
+            )
+            return False
         except Exception:
             self.logger.warning(
                 log_kv(

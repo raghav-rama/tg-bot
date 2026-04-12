@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from app.config import Settings
 from app.domain.commands import ACCESS_DENIED_TEXT
-from app.domain.errors import ProviderTimeoutError
+from app.domain.errors import DraftRateLimitedError, ProviderTimeoutError
 from app.domain.models import ImageInput, InboundMessage, StreamingProviderEvent
 
 
@@ -85,10 +85,12 @@ class FakeDraftSession:
         *,
         draft_id: int = 1,
         fail_on_update: bool = False,
+        retry_after: int | None = None,
         updated_event: asyncio.Event | None = None,
     ) -> None:
         self.draft_id = draft_id
         self.fail_on_update = fail_on_update
+        self.retry_after = retry_after
         self.updated_event = updated_event
         self.updates: list[str] = []
         self.finished = False
@@ -97,6 +99,8 @@ class FakeDraftSession:
     async def update(self, text: str) -> None:
         if self.fail_on_update:
             raise RuntimeError("draft update failed")
+        if self.retry_after is not None:
+            raise DraftRateLimitedError(retry_after=self.retry_after)
         self.updates.append(text)
         if self.updated_event is not None:
             self.updated_event.set()
@@ -288,6 +292,50 @@ async def test_draft_update_failure_falls_back_to_final_only_reply(service_bundl
     assert emitter.open_calls == 1
     assert emitter.draft_session.cancelled is True
     assert emitter.draft_session.finished is False
+
+
+async def test_draft_rate_limit_falls_back_to_final_only_reply(service_bundle) -> None:
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    messages = service_bundle["messages"]
+    provider = service_bundle["provider"]
+    emitter = FakeResponseEmitter(
+        draft_session=FakeDraftSession(retry_after=14)
+    )
+
+    service.settings.bot_draft_start_delay_ms = 0
+    service.settings.bot_draft_update_interval_ms = 0
+    service.settings.bot_draft_min_chars_delta = 1
+    provider.events = [
+        StreamingProviderEvent(type="delta", text="assistant"),
+        StreamingProviderEvent(type="delta", text=" reply"),
+        StreamingProviderEvent(
+            type="completed",
+            provider_message_id="resp_stream",
+            input_tokens=10,
+            output_tokens=20,
+            finish_reason="completed",
+            raw_model=service.settings.openai_model,
+        ),
+    ]
+
+    reply = await service.handle_inbound(
+        make_text_message(user_id=42, chat_id=305, text="stream this"),
+        responder=emitter,
+    )
+    conversation = await conversations.get_active(305)
+
+    assert conversation is not None
+    stored_messages = await messages.list_for_conversation(conversation.id)
+    assert reply.text == "assistant reply"
+    assert reply.delivered is True
+    assert emitter.sent_texts == ["assistant reply"]
+    assert emitter.open_calls == 1
+    assert emitter.draft_session.updates == []
+    assert emitter.draft_session.cancelled is True
+    assert emitter.draft_session.finished is False
+    assert [message.role for message in stored_messages] == ["user", "assistant"]
+    assert stored_messages[-1].text == "assistant reply"
 
 
 async def test_image_messages_skip_drafts_by_default(service_bundle) -> None:

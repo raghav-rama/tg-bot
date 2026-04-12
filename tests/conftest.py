@@ -81,8 +81,8 @@ def build_settings(database_path: Path, **overrides) -> Settings:
         "BOT_ENABLE_MESSAGE_DRAFTS": "true",
         "BOT_DRAFT_STREAM_ON_IMAGES": "false",
         "BOT_DRAFT_START_DELAY_MS": "750",
-        "BOT_DRAFT_UPDATE_INTERVAL_MS": "350",
-        "BOT_DRAFT_MIN_CHARS_DELTA": "30",
+        "BOT_DRAFT_UPDATE_INTERVAL_MS": "1200",
+        "BOT_DRAFT_MIN_CHARS_DELTA": "80",
     }
     values.update(overrides)
     return Settings(**values)

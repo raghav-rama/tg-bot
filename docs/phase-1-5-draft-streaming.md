@@ -184,11 +184,11 @@ Do not send a draft update for every tiny token delta.
 
 Start conservatively:
 
-- update every `250-500 ms` at most
-- or when at least `20-40` new visible characters have accumulated
+- update every `1200 ms` at most
+- or when at least `80` new visible characters have accumulated
 - whichever happens later
 
-These numbers are implementation defaults, not Telegram guarantees. They should be validated manually against real chats.
+These numbers are implementation defaults, not Telegram guarantees. Live Telegram verification on 2026-04-11 showed that more aggressive draft updates can hit per-chat flood control, so the defaults should stay conservative and be validated manually against real chats.
 
 ### Final handoff
 
@@ -231,6 +231,7 @@ Cross-chat concurrency can still exist, but per-chat overlap should stay simple.
 If `sendMessageDraft` fails:
 
 - log the failure with `chat_id`, `user_id`, and `draft_id`
+- log `retry_after` explicitly when Telegram rate limits a draft update
 - disable draft updates for that response
 - continue provider generation
 - still attempt to send the final text reply normally
@@ -315,7 +316,7 @@ Phase 1.5 is done when:
 ## Open Questions
 
 - Does the Bot API final send path always clear or replace the visible draft in all Telegram clients, or is an extra cleanup step needed?
-- Are there undocumented practical rate limits for repeated `sendMessageDraft` calls in one private chat?
+- What practical `sendMessageDraft` cadence remains stable across real Telegram clients and chats beyond the current conservative defaults?
 - Should Phase 1.5 stream image-understanding replies immediately, or start with text-input replies only?
 - Should the first rollout keep draft text plain only, or allow formatted entities once cleanup and cadence are proven stable?
 

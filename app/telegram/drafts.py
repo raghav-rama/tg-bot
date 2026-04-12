@@ -4,7 +4,9 @@ import itertools
 import logging
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramRetryAfter
 
+from app.domain.errors import DraftRateLimitedError
 from app.domain.interfaces import DraftSession, ResponseEmitter
 from app.logging import log_kv
 
@@ -20,11 +22,14 @@ class TelegramDraftSession:
     async def update(self, text: str) -> None:
         if self._closed:
             return
-        await self.bot.send_message_draft(
-            chat_id=self.chat_id,
-            draft_id=self.draft_id,
-            text=text,
-        )
+        try:
+            await self.bot.send_message_draft(
+                chat_id=self.chat_id,
+                draft_id=self.draft_id,
+                text=text,
+            )
+        except TelegramRetryAfter as exc:
+            raise DraftRateLimitedError(retry_after=exc.retry_after) from exc
 
     async def finish(self) -> None:
         if self._closed:
