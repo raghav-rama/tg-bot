@@ -5,10 +5,15 @@ from typing import Protocol
 
 from app.domain.models import (
     GeneratedImageResult,
+    GeneratedVideoResult,
     ImageGenerationRequest,
     ProviderRequest,
     ProviderResponse,
+    SubmittedVideoJob,
     StreamingProviderEvent,
+    VideoGenerationPollRequest,
+    VideoGenerationRequest,
+    VideoJobPollResult,
 )
 
 
@@ -32,6 +37,23 @@ class ImageGenerator(Protocol):
         request: ImageGenerationRequest,
     ) -> GeneratedImageResult:
         """Generate a normalized image result."""
+
+    async def close(self) -> None:
+        """Release provider resources."""
+
+
+class VideoGenerator(Protocol):
+    async def submit_video(
+        self,
+        request: VideoGenerationRequest,
+    ) -> SubmittedVideoJob:
+        """Submit a normalized long-running video generation job."""
+
+    async def poll_video(
+        self,
+        request: VideoGenerationPollRequest,
+    ) -> VideoJobPollResult:
+        """Poll a previously submitted video generation job."""
 
     async def close(self) -> None:
         """Release provider resources."""

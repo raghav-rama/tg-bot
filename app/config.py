@@ -82,6 +82,30 @@ class Settings(BaseSettings):
         default="image/jpeg",
         alias="VERTEX_IMAGE_OUTPUT_MIME_TYPE",
     )
+    vertex_video_model: str = Field(
+        default="veo-3.0-fast-generate-001",
+        alias="VERTEX_VIDEO_MODEL",
+    )
+    vertex_video_aspect_ratio: str = Field(
+        default="16:9",
+        alias="VERTEX_VIDEO_ASPECT_RATIO",
+    )
+    vertex_video_duration_seconds: int | None = Field(
+        default=4,
+        alias="VERTEX_VIDEO_DURATION_SECONDS",
+    )
+    vertex_video_output_gcs_uri: str | None = Field(
+        default=None,
+        alias="VERTEX_VIDEO_OUTPUT_GCS_URI",
+    )
+    bot_video_max_bytes: int = Field(
+        default=50 * 1024 * 1024,
+        alias="BOT_VIDEO_MAX_BYTES",
+    )
+    video_job_poll_interval_seconds: int = Field(
+        default=15,
+        alias="VIDEO_JOB_POLL_INTERVAL_SECONDS",
+    )
 
     @field_validator("app_update_mode")
     @classmethod
@@ -123,6 +147,9 @@ class Settings(BaseSettings):
         "vertex_image_model",
         "vertex_image_aspect_ratio",
         "vertex_image_output_mime_type",
+        "vertex_video_model",
+        "vertex_video_aspect_ratio",
+        "vertex_video_output_gcs_uri",
         mode="before",
     )
     @classmethod
@@ -132,10 +159,27 @@ class Settings(BaseSettings):
         normalized = value.strip()
         return normalized or None
 
+    @field_validator(
+        "vertex_video_duration_seconds",
+        "bot_video_max_bytes",
+        "video_job_poll_interval_seconds",
+    )
+    @classmethod
+    def validate_positive_ints(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if value <= 0:
+            raise ValueError("video settings must be greater than zero")
+        return value
+
     @property
     def allowed_user_ids(self) -> set[int]:
         return {int(part) for part in self.telegram_allowed_user_ids.split(",") if part}
 
     @property
     def vertex_image_generation_enabled(self) -> bool:
+        return self.vertex_api_key is not None or self.vertex_project_id is not None
+
+    @property
+    def vertex_video_generation_enabled(self) -> bool:
         return self.vertex_api_key is not None or self.vertex_project_id is not None

@@ -10,7 +10,7 @@ from aiogram.types import BufferedInputFile
 
 from app.domain.errors import DraftRateLimitedError
 from app.domain.interfaces import DraftSession, ResponseEmitter
-from app.domain.models import GeneratedImageResult, SentPhoto
+from app.domain.models import GeneratedImageResult, GeneratedVideoResult, SentPhoto, SentVideo
 from app.logging import log_kv
 from app.telegram.formatting import render_telegram_html
 
@@ -112,6 +112,32 @@ class TelegramResponseEmitter:
             width=largest.width,
             height=largest.height,
             file_size=largest.file_size,
+        )
+
+    async def send_video(self, video: GeneratedVideoResult) -> SentVideo:
+        extension = ".mp4" if video.mime_type == "video/mp4" else ".bin"
+        message = await self.bot.send_video(
+            chat_id=self.chat_id,
+            video=BufferedInputFile(
+                video.video_bytes,
+                filename=f"generated{extension}",
+            ),
+            caption=video.caption,
+            supports_streaming=True,
+        )
+        if message.video is None:
+            raise RuntimeError("Telegram did not return video metadata for the sent video")
+
+        sent_video = message.video
+        return SentVideo(
+            telegram_message_id=message.message_id,
+            telegram_file_id=sent_video.file_id,
+            telegram_file_unique_id=sent_video.file_unique_id,
+            width=sent_video.width,
+            height=sent_video.height,
+            duration_seconds=sent_video.duration,
+            mime_type=sent_video.mime_type,
+            file_size=sent_video.file_size,
         )
 
     async def open_draft(self) -> DraftSession:

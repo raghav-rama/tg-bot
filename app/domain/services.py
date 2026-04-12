@@ -17,6 +17,10 @@ from app.domain.commands import (
     IMAGE_PROMPT_REQUIRED_TEXT,
     PROVIDER_RETRY_TEXT,
     SUPPORTED_COMMANDS,
+    VIDEO_GENERATION_NOT_CONFIGURED_TEXT,
+    VIDEO_GENERATION_QUEUED_TEXT,
+    VIDEO_GENERATION_RETRY_TEXT,
+    VIDEO_PROMPT_REQUIRED_TEXT,
     UNSUPPORTED_MESSAGE_TEXT,
     render_help_message,
     render_reset_message,
@@ -38,13 +42,14 @@ from app.domain.models import (
     ImageGenerationRequest,
     InboundMessage,
     ProviderRequest,
-    SentPhoto,
     ServiceReply,
     StreamingProviderEvent,
+    VideoGenerationRequest,
 )
 from app.logging import log_kv
-from app.providers.base import AIProvider, ImageGenerator
+from app.providers.base import AIProvider, ImageGenerator, VideoGenerator
 from app.storage.conversations import ConversationRepository
+from app.storage.generation_jobs import GenerationJobRepository
 from app.storage.generated_images import GeneratedImageRepository
 from app.storage.messages import MessageRepository
 
@@ -94,6 +99,8 @@ class ChatService:
         provider: AIProvider,
         generated_images: GeneratedImageRepository | None = None,
         image_generator: ImageGenerator | None = None,
+        generation_jobs: GenerationJobRepository | None = None,
+        video_generator: VideoGenerator | None = None,
     ) -> None:
         self.settings = settings
         self.conversations = conversations
@@ -101,6 +108,8 @@ class ChatService:
         self.provider = provider
         self.generated_images = generated_images
         self.image_generator = image_generator
+        self.generation_jobs = generation_jobs
+        self.video_generator = video_generator
         self.logger = logging.getLogger("app.domain.services")
         self._active_runs: dict[int, _ActiveRun] = {}
         self._active_runs_lock = asyncio.Lock()
@@ -161,7 +170,11 @@ class ChatService:
                 retry_text = (
                     IMAGE_GENERATION_RETRY_TEXT
                     if self._is_image_command(message)
-                    else PROVIDER_RETRY_TEXT
+                    else (
+                        VIDEO_GENERATION_RETRY_TEXT
+                        if self._is_video_command(message)
+                        else PROVIDER_RETRY_TEXT
+                    )
                 )
                 self.logger.warning(
                     log_kv(
@@ -344,6 +357,8 @@ class ChatService:
                 chat_model=self.settings.openai_model,
                 image_generation_enabled=self.settings.vertex_image_generation_enabled,
                 image_model=self.settings.vertex_image_model,
+                video_generation_enabled=self.settings.vertex_video_generation_enabled,
+                video_model=self.settings.vertex_video_model,
                 memory_enabled=self.settings.bot_history_max_turns > 0,
             )
         elif command == "/image":
@@ -352,6 +367,11 @@ class ChatService:
                 message=message,
                 responder=responder,
                 active_run=active_run,
+            )
+        elif command == "/video":
+            return await self._handle_video_command(
+                conversation=conversation,
+                message=message,
             )
         elif command in SUPPORTED_COMMANDS:
             reply_text = render_help_message()
@@ -432,6 +452,80 @@ class ChatService:
         )
         await self.conversations.touch(conversation.id)
         return ServiceReply(text="", delivered=True)
+
+    async def _handle_video_command(
+        self,
+        *,
+        conversation: ConversationRecord,
+        message: InboundMessage,
+    ) -> ServiceReply:
+        prompt = self._extract_video_prompt(message)
+        if prompt is None:
+            await self._persist_command_exchange(
+                conversation,
+                message,
+                VIDEO_PROMPT_REQUIRED_TEXT,
+            )
+            return ServiceReply(text=VIDEO_PROMPT_REQUIRED_TEXT)
+
+        if self.video_generator is None or self.generation_jobs is None:
+            await self._persist_command_exchange(
+                conversation,
+                message,
+                VIDEO_GENERATION_NOT_CONFIGURED_TEXT,
+            )
+            return ServiceReply(text=VIDEO_GENERATION_NOT_CONFIGURED_TEXT)
+
+        await self._persist_user_command_message(conversation, message)
+        self.logger.info(
+            log_kv(
+                "video_generation_requested",
+                update_id=message.update_id,
+                chat_id=message.chat_id,
+                user_id=message.user_id,
+                model=self.settings.vertex_video_model,
+                prompt_chars=len(prompt),
+                aspect_ratio=self.settings.vertex_video_aspect_ratio,
+                duration_seconds=self.settings.vertex_video_duration_seconds,
+                output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
+            )
+        )
+        submitted_job = await self.video_generator.submit_video(
+            VideoGenerationRequest(
+                chat_id=message.chat_id,
+                user_id=message.user_id,
+                prompt=prompt,
+                model=self.settings.vertex_video_model,
+                aspect_ratio=self.settings.vertex_video_aspect_ratio,
+                duration_seconds=self.settings.vertex_video_duration_seconds,
+                output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
+            )
+        )
+        self.logger.info(
+            log_kv(
+                "video_generation_queued",
+                update_id=message.update_id,
+                chat_id=message.chat_id,
+                user_id=message.user_id,
+                operation_name=submitted_job.operation_name,
+                model=submitted_job.raw_model,
+            )
+        )
+
+        await self.generation_jobs.add_video_job(
+            conversation_id=conversation.id,
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            prompt_text=prompt,
+            provider=submitted_job.provider,
+            model=submitted_job.raw_model,
+            operation_name=submitted_job.operation_name,
+            duration_seconds=self.settings.vertex_video_duration_seconds,
+            created_at=message.sent_at,
+        )
+        await self._persist_command_reply(conversation, VIDEO_GENERATION_QUEUED_TEXT)
+        await self.conversations.touch(conversation.id)
+        return ServiceReply(text=VIDEO_GENERATION_QUEUED_TEXT)
 
     async def _persist_command_exchange(
         self,
@@ -630,6 +724,9 @@ class ChatService:
         prompt = parts[1].strip()
         return prompt or None
 
+    def _extract_video_prompt(self, message: InboundMessage) -> str | None:
+        return self._extract_image_prompt(message)
+
     async def _persist_generated_image_delivery(
         self,
         *,
@@ -673,12 +770,17 @@ class ChatService:
     def _provider_context(self, message: InboundMessage) -> tuple[str | None, str | None]:
         if self._is_image_command(message):
             return ("vertex", self.settings.vertex_image_model)
+        if self._is_video_command(message):
+            return ("vertex", self.settings.vertex_video_model)
         if message.message_type != "command":
             return ("openai", self.settings.openai_model)
         return (None, None)
 
     def _is_image_command(self, message: InboundMessage) -> bool:
         return message.message_type == "command" and (message.command or "").lower() == "/image"
+
+    def _is_video_command(self, message: InboundMessage) -> bool:
+        return message.message_type == "command" and (message.command or "").lower() == "/video"
 
     def _drafts_enabled(
         self,

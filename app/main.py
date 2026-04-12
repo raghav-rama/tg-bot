@@ -12,15 +12,19 @@ from app.api.webhook import router as webhook_router
 from app.config import Settings
 from app.domain.services import ChatService
 from app.logging import configure_logging, log_kv
-from app.providers.base import AIProvider, ImageGenerator
+from app.providers.base import AIProvider, ImageGenerator, VideoGenerator
 from app.providers.openai_provider import OpenAIProvider
 from app.providers.vertex_image_provider import VertexImageProvider
+from app.providers.vertex_video_provider import VertexVideoProvider
 from app.storage.conversations import ConversationRepository
 from app.storage.db import Database
+from app.storage.generation_jobs import GenerationJobRepository
 from app.storage.generated_images import GeneratedImageRepository
 from app.storage.messages import MessageRepository
+from app.telegram.drafts import TelegramResponseEmitter
 from app.telegram.handlers import TelegramUpdateProcessor
 from app.telegram.polling import TelegramRuntime
+from app.workers.video_jobs import VideoJobWorker
 
 
 @dataclass(slots=True)
@@ -30,10 +34,13 @@ class AppContainer:
     conversations: ConversationRepository | None = None
     messages: MessageRepository | None = None
     generated_images: GeneratedImageRepository | None = None
+    generation_jobs: GenerationJobRepository | None = None
     provider: AIProvider | None = None
     image_generator: ImageGenerator | None = None
+    video_generator: VideoGenerator | None = None
     chat_service: ChatService | None = None
     telegram_runtime: TelegramRuntime | None = None
+    video_job_worker: VideoJobWorker | None = None
     startup_error: str | None = None
 
 
@@ -57,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             conversations = ConversationRepository(database)
             messages = MessageRepository(database)
             generated_images = GeneratedImageRepository(database)
+            generation_jobs = GenerationJobRepository(database)
             provider = OpenAIProvider(
                 api_key=loaded_settings.openai_api_key.get_secret_value(),
                 timeout_seconds=loaded_settings.openai_timeout_seconds,
@@ -75,6 +83,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     default_aspect_ratio=loaded_settings.vertex_image_aspect_ratio,
                     default_output_mime_type=loaded_settings.vertex_image_output_mime_type,
                 )
+            video_generator = None
+            if loaded_settings.vertex_video_generation_enabled:
+                video_generator = VertexVideoProvider(
+                    api_key=(
+                        loaded_settings.vertex_api_key.get_secret_value()
+                        if loaded_settings.vertex_api_key is not None
+                        else None
+                    ),
+                    project=loaded_settings.vertex_project_id or "",
+                    location=loaded_settings.vertex_location,
+                    default_model=loaded_settings.vertex_video_model,
+                    default_aspect_ratio=loaded_settings.vertex_video_aspect_ratio,
+                    default_duration_seconds=loaded_settings.vertex_video_duration_seconds,
+                    default_output_gcs_uri=loaded_settings.vertex_video_output_gcs_uri,
+                )
             chat_service = ChatService(
                 settings=loaded_settings,
                 conversations=conversations,
@@ -82,6 +105,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider=provider,
                 generated_images=generated_images,
                 image_generator=image_generator,
+                generation_jobs=generation_jobs,
+                video_generator=video_generator,
             )
             processor = TelegramUpdateProcessor(
                 chat_service=chat_service,
@@ -93,6 +118,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             if loaded_settings.app_update_mode == "polling":
                 await telegram_runtime.start()
+            video_job_worker = None
+            if video_generator is not None:
+                video_job_worker = VideoJobWorker(
+                    settings=loaded_settings,
+                    conversations=conversations,
+                    messages=messages,
+                    generation_jobs=generation_jobs,
+                    video_generator=video_generator,
+                    emitter_factory=lambda chat_id: TelegramResponseEmitter(
+                        bot=telegram_runtime.bot,
+                        chat_id=chat_id,
+                    ),
+                )
+                await video_job_worker.start()
 
             container = AppContainer(
                 settings=loaded_settings,
@@ -100,10 +139,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 conversations=conversations,
                 messages=messages,
                 generated_images=generated_images,
+                generation_jobs=generation_jobs,
                 provider=provider,
                 image_generator=image_generator,
+                video_generator=video_generator,
                 chat_service=chat_service,
                 telegram_runtime=telegram_runtime,
+                video_job_worker=video_job_worker,
             )
             app.state.container = container
             logger.info(
@@ -111,6 +153,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "application_started",
                     update_mode=loaded_settings.app_update_mode,
                     model=loaded_settings.openai_model,
+                    video_generation_enabled=loaded_settings.vertex_video_generation_enabled,
+                    video_model=(
+                        loaded_settings.vertex_video_model
+                        if loaded_settings.vertex_video_generation_enabled
+                        else None
+                    ),
+                    video_output_gcs_uri=loaded_settings.vertex_video_output_gcs_uri,
+                    video_poll_interval_seconds=loaded_settings.video_job_poll_interval_seconds,
                 )
             )
         except SettingsValidationError as exc:
@@ -128,12 +178,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             shutdown_container: AppContainer = app.state.container
+            if shutdown_container.video_job_worker is not None:
+                await shutdown_container.video_job_worker.close()
             if shutdown_container.telegram_runtime is not None:
                 await shutdown_container.telegram_runtime.close()
             if shutdown_container.provider is not None:
                 await shutdown_container.provider.close()
             if shutdown_container.image_generator is not None:
                 await shutdown_container.image_generator.close()
+            if shutdown_container.video_generator is not None:
+                await shutdown_container.video_generator.close()
             if shutdown_container.database is not None:
                 await shutdown_container.database.close()
 

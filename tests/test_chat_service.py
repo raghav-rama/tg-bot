@@ -4,9 +4,19 @@ import asyncio
 from datetime import datetime, timezone
 
 from app.config import Settings
-from app.domain.commands import ACCESS_DENIED_TEXT, IMAGE_GENERATION_RETRY_TEXT
+from app.domain.commands import (
+    ACCESS_DENIED_TEXT,
+    IMAGE_GENERATION_RETRY_TEXT,
+    VIDEO_GENERATION_RETRY_TEXT,
+)
 from app.domain.errors import DraftRateLimitedError, ProviderTimeoutError
-from app.domain.models import ImageInput, InboundMessage, SentPhoto, StreamingProviderEvent
+from app.domain.models import (
+    ImageInput,
+    InboundMessage,
+    SentPhoto,
+    SentVideo,
+    StreamingProviderEvent,
+)
 
 
 def utc_datetime() -> datetime:
@@ -117,6 +127,7 @@ class FakeResponseEmitter:
     def __init__(self, *, draft_session: FakeDraftSession | None = None) -> None:
         self.sent_texts: list[str] = []
         self.sent_photos: list[bytes] = []
+        self.sent_videos: list[bytes] = []
         self.draft_session = draft_session or FakeDraftSession()
         self.open_calls = 0
         self.photo_result = SentPhoto(
@@ -127,6 +138,16 @@ class FakeResponseEmitter:
             height=1024,
             file_size=2048,
         )
+        self.video_result = SentVideo(
+            telegram_message_id=9002,
+            telegram_file_id="tg-video-1",
+            telegram_file_unique_id="tg-video-uniq-1",
+            width=1280,
+            height=720,
+            duration_seconds=4,
+            mime_type="video/mp4",
+            file_size=4096,
+        )
 
     async def send_text(self, text: str) -> None:
         self.sent_texts.append(text)
@@ -134,6 +155,10 @@ class FakeResponseEmitter:
     async def send_photo(self, image) -> SentPhoto:
         self.sent_photos.append(image.image_bytes)
         return self.photo_result
+
+    async def send_video(self, video) -> SentVideo:
+        self.sent_videos.append(video.video_bytes)
+        return self.video_result
 
     async def open_draft(self) -> FakeDraftSession:
         self.open_calls += 1
@@ -328,6 +353,98 @@ async def test_image_command_returns_not_configured_when_generator_missing(servi
     assert reply.delivered is True
     assert emitter.sent_texts == ["Image generation is not configured right now."]
     assert emitter.sent_photos == []
+
+
+async def test_video_command_queues_generation_job(service_bundle) -> None:
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
+    video_generator = service_bundle["video_generator"]
+    emitter = FakeResponseEmitter()
+
+    reply = await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=214,
+            command="/video slow cinematic dolly shot through a rainy neon alley",
+            update_id=8,
+        ),
+        responder=emitter,
+    )
+    conversation = await conversations.get_active(214)
+
+    assert reply.text == "Video generation started. I'll send it here when it's ready."
+    assert reply.delivered is True
+    assert len(video_generator.submit_calls) == 1
+    assert conversation is not None
+
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    assert len(stored_jobs) == 1
+    assert stored_jobs[0].status == "queued"
+    assert stored_jobs[0].prompt_text == "slow cinematic dolly shot through a rainy neon alley"
+    assert stored_jobs[0].operation_name == "operations/1"
+    assert emitter.sent_texts == [reply.text]
+    assert emitter.sent_videos == []
+
+
+async def test_video_command_requires_prompt(service_bundle) -> None:
+    service = service_bundle["service"]
+    emitter = FakeResponseEmitter()
+
+    reply = await service.handle_inbound(
+        make_command_message(user_id=42, chat_id=215, command="/video", update_id=9),
+        responder=emitter,
+    )
+
+    assert reply.text.startswith("Use /video followed by a prompt")
+    assert reply.delivered is True
+    assert emitter.sent_texts == [reply.text]
+    assert emitter.sent_videos == []
+
+
+async def test_video_command_provider_failure_returns_retry_text(service_bundle) -> None:
+    service = service_bundle["service"]
+    video_generator = service_bundle["video_generator"]
+    emitter = FakeResponseEmitter()
+
+    video_generator.submit_error = ProviderTimeoutError("timed out")
+
+    reply = await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=216,
+            command="/video moonlit aerial shot above a foggy coastline",
+            update_id=11,
+        ),
+        responder=emitter,
+    )
+
+    assert reply.text == VIDEO_GENERATION_RETRY_TEXT
+    assert reply.delivered is True
+    assert emitter.sent_texts == [VIDEO_GENERATION_RETRY_TEXT]
+    assert emitter.sent_videos == []
+
+
+async def test_video_command_returns_not_configured_when_generator_missing(service_bundle) -> None:
+    service = service_bundle["service"]
+    emitter = FakeResponseEmitter()
+
+    service.video_generator = None
+
+    reply = await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=217,
+            command="/video graphite robot crossing a desert at sunset",
+            update_id=12,
+        ),
+        responder=emitter,
+    )
+
+    assert reply.text == "Video generation is not configured right now."
+    assert reply.delivered is True
+    assert emitter.sent_texts == ["Video generation is not configured right now."]
+    assert emitter.sent_videos == []
 
 
 async def test_text_message_streams_drafts_and_delivers_final_reply(service_bundle) -> None:

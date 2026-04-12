@@ -39,16 +39,36 @@ class VertexImageProvider:
                 "google-genai must be installed to enable Vertex image generation"
             ) from exc
 
-        client_kwargs: dict[str, Any] = {"vertexai": True}
-        if api_key is not None:
-            client_kwargs["api_key"] = api_key
-        else:
-            client_kwargs["project"] = project
-            client_kwargs["location"] = location
-
-        self._client = genai.Client(**client_kwargs)
+        self._client = genai.Client(
+            **self._build_client_kwargs(
+                api_key=api_key,
+                project=project,
+                location=location,
+            )
+        )
         self._types_module = types
         self._api_error_type = errors.APIError
+
+    @staticmethod
+    def _build_client_kwargs(
+        *,
+        api_key: str | None,
+        project: str,
+        location: str,
+    ) -> dict[str, Any]:
+        if project:
+            return {
+                "vertexai": True,
+                "project": project,
+                "location": location,
+            }
+
+        client_kwargs: dict[str, Any] = {
+            "vertexai": True,
+        }
+        if api_key is not None:
+            client_kwargs["api_key"] = api_key
+        return client_kwargs
 
     async def close(self) -> None:
         return None

@@ -69,6 +69,42 @@ SCHEMA_STATEMENTS = (
     CREATE INDEX IF NOT EXISTS idx_generated_images_conversation_created
     ON generated_images(conversation_id, created_at)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS generation_jobs (
+        id INTEGER PRIMARY KEY,
+        conversation_id INTEGER NOT NULL,
+        chat_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        job_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        prompt_text TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        operation_name TEXT NOT NULL,
+        output_uri TEXT NULL,
+        mime_type TEXT NULL,
+        telegram_message_id INTEGER NULL,
+        telegram_file_id TEXT NULL,
+        telegram_file_unique_id TEXT NULL,
+        width INTEGER NULL,
+        height INTEGER NULL,
+        duration_seconds INTEGER NULL,
+        file_size INTEGER NULL,
+        failure_reason TEXT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT NULL,
+        FOREIGN KEY (conversation_id) REFERENCES conversations (id)
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_generation_jobs_operation_name
+    ON generation_jobs(operation_name)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_generation_jobs_status_created
+    ON generation_jobs(status, created_at)
+    """,
 )
 
 

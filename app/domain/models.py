@@ -7,6 +7,7 @@ from typing import Literal
 MessageType = Literal["text", "image", "command"]
 Role = Literal["user", "assistant"]
 ChatType = Literal["private", "group", "supergroup", "channel"]
+GenerationJobStatus = Literal["queued", "running", "completed", "failed"]
 
 
 @dataclass(slots=True)
@@ -174,6 +175,93 @@ class StoredGeneratedImage:
     height: int | None
     file_size: int | None
     created_at: datetime
+
+
+@dataclass(slots=True)
+class VideoGenerationRequest:
+    chat_id: int
+    user_id: int
+    prompt: str
+    model: str
+    aspect_ratio: str
+    duration_seconds: int | None
+    output_gcs_uri: str | None
+
+
+@dataclass(slots=True)
+class VideoGenerationPollRequest:
+    operation_name: str
+    prompt: str
+    model: str
+
+
+@dataclass(slots=True)
+class SubmittedVideoJob:
+    operation_name: str
+    provider: str
+    raw_model: str
+
+
+@dataclass(slots=True)
+class GeneratedVideoResult:
+    video_bytes: bytes
+    mime_type: str
+    provider: str
+    raw_model: str
+    prompt: str
+    output_uri: str | None
+    caption: str | None = None
+    duration_seconds: int | None = None
+    width: int | None = None
+    height: int | None = None
+    file_size: int | None = None
+
+
+@dataclass(slots=True)
+class VideoJobPollResult:
+    status: Literal["running", "completed", "failed"]
+    operation_name: str
+    generated_video: GeneratedVideoResult | None = None
+    failure_reason: str | None = None
+
+
+@dataclass(slots=True)
+class SentVideo:
+    telegram_message_id: int
+    telegram_file_id: str
+    telegram_file_unique_id: str
+    width: int
+    height: int
+    duration_seconds: int | None
+    mime_type: str | None
+    file_size: int | None
+
+
+@dataclass(slots=True)
+class StoredGenerationJob:
+    id: int
+    conversation_id: int
+    chat_id: int
+    user_id: int
+    job_type: str
+    status: GenerationJobStatus
+    prompt_text: str
+    provider: str
+    model: str
+    operation_name: str
+    output_uri: str | None
+    mime_type: str | None
+    telegram_message_id: int | None
+    telegram_file_id: str | None
+    telegram_file_unique_id: str | None
+    width: int | None
+    height: int | None
+    duration_seconds: int | None
+    file_size: int | None
+    failure_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
 
 
 @dataclass(slots=True)

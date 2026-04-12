@@ -6,36 +6,40 @@ This document separates the current repo state from the planned delivery phases.
 
 - `architecture.md`, `flows.md`, and `implementation-plan.md` define the Phase 1 build only.
 - `phase-1-5-draft-streaming.md` defines the Phase 1.5 draft-streaming work only.
-- `phase-2-vertex-image-generation.md` defines the active Phase 2 image-generation work only.
+- `phase-2-vertex-image-generation.md` defines the completed Phase 2 image-generation work only.
+- `phase-3-vertex-video-generation.md` defines the active Phase 3 video-generation work only.
 - This roadmap tracks the broader direction, especially the later Vertex video-generation work.
 
 ## Current Phase
 
-- Active phase: `Phase 2 - Vertex Image Generation`
+- Active phase: `Phase 3 - Vertex Video Generation`
 - Status: `in_progress`
 - Last updated: `2026-04-12`
-- Exit criteria source: `Phase 2 - Vertex Image Generation`
+- Exit criteria source: `Phase 3 - Vertex Video Generation`
 - Evidence:
   - Phase 1 foundation work is accepted as complete for repo sequencing
   - Phase 1.5 draft streaming is accepted as complete and no longer blocks the next milestone
-  - an explicit `/image` command path now exists alongside the existing OpenAI chat flow
-  - generated image delivery now uses Telegram `sendPhoto` through the Telegram adapter
-  - generated-image prompt and Telegram file metadata are now persisted separately from chat history in SQLite
-  - OpenAI text and image-understanding chat remains unchanged while Vertex image generation is added as a separate path
-  - live Vertex and Telegram runtime verification for the new `/image` flow is still pending
+  - Phase 2 image generation is accepted as complete for repo sequencing
+  - an explicit `/video` command path now exists alongside the existing OpenAI chat and `/image` flows
+  - video generation now uses persisted `generation_jobs` rows plus a background polling worker instead of blocking the original request path
+  - completed video jobs now deliver through Telegram `sendVideo`
+  - live Vertex and Telegram runtime verification for the new `/video` flow is still pending
 
 ## Current State
 
-As of `2026-04-12`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, and an in-progress Phase 2 image-generation slice.
+As of `2026-04-12`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, and an in-progress Phase 3 video-generation slice.
 
-- Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, OpenAI chat, and Vertex image generation.
+- Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, OpenAI chat, and Vertex image plus video generation.
 - A polling-first runtime exists, while the webhook route remains reserved behind the same shared processing path.
 - SQLite-backed conversation memory, command handling, allowlist checks, and text plus single-image inbound normalization are implemented.
 - OpenAI response streaming, in-memory Telegram draft sessions, and per-chat supersession handling are implemented and accepted as complete for Phase 1.5.
 - `/image <prompt>` now generates one image through Vertex AI and sends it back through Telegram `sendPhoto`.
 - Generated-image metadata is stored in SQLite without persisting raw image bytes.
-- Tests exist under `tests/` for health and readiness behavior, normalization, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, supersession, Telegram formatting, and the new image-generation flow.
-- Real Vertex and Telegram verification still depends on configured credentials and a manual runtime check.
+- `/video <prompt>` now submits one long-running Vertex video job, stores it in SQLite, and returns an immediate queued acknowledgement.
+- An in-process polling worker now checks pending video jobs and delivers completed assets through Telegram `sendVideo`.
+- Video job persistence stores operation state, output URIs, failure reasons, and Telegram delivery metadata without persisting raw video bytes in SQLite.
+- Tests exist under `tests/` for health and readiness behavior, normalization, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, supersession, Telegram formatting, image generation, video job submission, worker completion, worker failure handling, and the new Vertex video provider.
+- Real Vertex and Telegram verification still depends on configured credentials and a manual runtime check, and storage cleanup policy remains a later Phase 3 task.
 
 ## Recommended Sequencing
 
@@ -123,7 +127,7 @@ Phase 1.5 is done when:
 
 ## Phase 2 - Vertex Image Generation
 
-Status: `in_progress`
+Status: `complete`
 
 Dedicated planning doc: [phase-2-vertex-image-generation.md](phase-2-vertex-image-generation.md)
 
@@ -166,7 +170,9 @@ Phase 2 is done when:
 
 ## Phase 3 - Vertex Video Generation
 
-Status: `not_started`
+Status: `in_progress`
+
+Dedicated planning doc: [phase-3-vertex-video-generation.md](phase-3-vertex-video-generation.md)
 
 ### Goal
 
@@ -234,7 +240,9 @@ These choices should be made before coding gets too far:
 - Telegram Bot API: https://core.telegram.org/bots/api
 - Telegram Bot API `sendMessageDraft`: https://core.telegram.org/bots/api#sendmessagedraft
 - Telegram Bot API `sendPhoto`: https://core.telegram.org/bots/api#sendphoto
+- Telegram Bot API `sendVideo`: https://core.telegram.org/bots/api#sendvideo
 - Vertex AI quickstart: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start
 - Vertex AI API keys: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/api-keys
 - Vertex AI image generation overview: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/image/overview
+- Vertex AI video generation overview: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/video/generate-videos-from-text
 - Google Gen AI SDK overview: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/sdks/overview

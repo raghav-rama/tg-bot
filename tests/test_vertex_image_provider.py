@@ -37,6 +37,33 @@ class _FakeAPIError(Exception):
         self.message = message
 
 
+def test_vertex_image_client_kwargs_prefer_adc_when_project_is_set() -> None:
+    kwargs = VertexImageProvider._build_client_kwargs(
+        api_key="vertex-key",
+        project="test-project",
+        location="us-central1",
+    )
+
+    assert kwargs == {
+        "vertexai": True,
+        "project": "test-project",
+        "location": "us-central1",
+    }
+
+
+def test_vertex_image_client_kwargs_use_api_key_without_project() -> None:
+    kwargs = VertexImageProvider._build_client_kwargs(
+        api_key="vertex-key",
+        project="",
+        location="us-central1",
+    )
+
+    assert kwargs == {
+        "vertexai": True,
+        "api_key": "vertex-key",
+    }
+
+
 @pytest.mark.asyncio
 async def test_generate_image_returns_first_image_bytes() -> None:
     models = _FakeModels(

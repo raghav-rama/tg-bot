@@ -7,10 +7,19 @@ from pathlib import Path
 import pytest_asyncio
 
 from app.config import Settings
-from app.domain.models import GeneratedImageResult, ProviderResponse, StreamingProviderEvent
+from app.domain.models import (
+    GeneratedImageResult,
+    GeneratedVideoResult,
+    ProviderResponse,
+    StreamingProviderEvent,
+    SubmittedVideoJob,
+    VideoGenerationPollRequest,
+    VideoJobPollResult,
+)
 from app.domain.services import ChatService
 from app.storage.conversations import ConversationRepository
 from app.storage.db import Database
+from app.storage.generation_jobs import GenerationJobRepository
 from app.storage.generated_images import GeneratedImageRepository
 from app.storage.messages import MessageRepository
 
@@ -93,6 +102,50 @@ class FakeImageGenerator:
         return None
 
 
+class FakeVideoGenerator:
+    def __init__(self, *, video_bytes: bytes = b"generated-video") -> None:
+        self.video_bytes = video_bytes
+        self.submit_calls = []
+        self.poll_calls: list[VideoGenerationPollRequest] = []
+        self.submit_error: Exception | None = None
+        self.poll_error: Exception | None = None
+        self.poll_results: list[VideoJobPollResult] = []
+
+    async def submit_video(self, request):
+        self.submit_calls.append(request)
+        if self.submit_error is not None:
+            raise self.submit_error
+        return SubmittedVideoJob(
+            operation_name=f"operations/{len(self.submit_calls)}",
+            provider="vertex",
+            raw_model=request.model,
+        )
+
+    async def poll_video(self, request: VideoGenerationPollRequest) -> VideoJobPollResult:
+        self.poll_calls.append(request)
+        if self.poll_error is not None:
+            raise self.poll_error
+        if self.poll_results:
+            return self.poll_results.pop(0)
+        return VideoJobPollResult(
+            status="completed",
+            operation_name=request.operation_name,
+            generated_video=GeneratedVideoResult(
+                video_bytes=self.video_bytes,
+                mime_type="video/mp4",
+                provider="vertex",
+                raw_model=request.model,
+                prompt=request.prompt,
+                output_uri=None,
+                duration_seconds=4,
+                file_size=len(self.video_bytes),
+            ),
+        )
+
+    async def close(self) -> None:
+        return None
+
+
 def build_settings(database_path: Path, **overrides) -> Settings:
     values = {
         "TELEGRAM_BOT_TOKEN": "test-token",
@@ -107,6 +160,10 @@ def build_settings(database_path: Path, **overrides) -> Settings:
         "BOT_DRAFT_START_DELAY_MS": "750",
         "BOT_DRAFT_UPDATE_INTERVAL_MS": "1200",
         "BOT_DRAFT_MIN_CHARS_DELTA": "80",
+        "VERTEX_VIDEO_MODEL": "veo-3.0-fast-generate-001",
+        "VERTEX_VIDEO_DURATION_SECONDS": "4",
+        "BOT_VIDEO_MAX_BYTES": str(50 * 1024 * 1024),
+        "VIDEO_JOB_POLL_INTERVAL_SECONDS": "15",
     }
     values.update(overrides)
     return Settings(**values)
@@ -122,8 +179,10 @@ async def service_bundle(tmp_path):
     conversations = ConversationRepository(database)
     messages = MessageRepository(database)
     generated_images = GeneratedImageRepository(database)
+    generation_jobs = GenerationJobRepository(database)
     provider = FakeProvider()
     image_generator = FakeImageGenerator()
+    video_generator = FakeVideoGenerator()
     service = ChatService(
         settings=settings,
         conversations=conversations,
@@ -131,6 +190,8 @@ async def service_bundle(tmp_path):
         provider=provider,
         generated_images=generated_images,
         image_generator=image_generator,
+        generation_jobs=generation_jobs,
+        video_generator=video_generator,
     )
 
     yield {
@@ -139,8 +200,10 @@ async def service_bundle(tmp_path):
         "conversations": conversations,
         "messages": messages,
         "generated_images": generated_images,
+        "generation_jobs": generation_jobs,
         "provider": provider,
         "image_generator": image_generator,
+        "video_generator": video_generator,
         "service": service,
     }
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from app.domain.models import GeneratedImageResult, SentPhoto
+from app.domain.models import GeneratedImageResult, GeneratedVideoResult, SentPhoto, SentVideo
 
 
 class DraftSession(Protocol):
@@ -24,6 +24,9 @@ class ResponseEmitter(Protocol):
 
     async def send_photo(self, image: GeneratedImageResult) -> SentPhoto:
         """Deliver a generated photo reply."""
+
+    async def send_video(self, video: GeneratedVideoResult) -> SentVideo:
+        """Deliver a generated video reply."""
 
     async def open_draft(self) -> DraftSession:
         """Allocate a draft session for partial updates."""
