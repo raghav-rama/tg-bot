@@ -12,6 +12,9 @@ from app.domain.commands import (
     ACCESS_DENIED_TEXT,
     EMPTY_TEXT_TEXT,
     GENERIC_FAILURE_TEXT,
+    IMAGE_GENERATION_NOT_CONFIGURED_TEXT,
+    IMAGE_GENERATION_RETRY_TEXT,
+    IMAGE_PROMPT_REQUIRED_TEXT,
     PROVIDER_RETRY_TEXT,
     SUPPORTED_COMMANDS,
     UNSUPPORTED_MESSAGE_TEXT,
@@ -31,14 +34,18 @@ from app.domain.errors import (
 from app.domain.interfaces import DraftSession, ResponseEmitter
 from app.domain.models import (
     ConversationRecord,
+    GeneratedImageResult,
+    ImageGenerationRequest,
     InboundMessage,
     ProviderRequest,
+    SentPhoto,
     ServiceReply,
     StreamingProviderEvent,
 )
 from app.logging import log_kv
-from app.providers.base import AIProvider
+from app.providers.base import AIProvider, ImageGenerator
 from app.storage.conversations import ConversationRepository
+from app.storage.generated_images import GeneratedImageRepository
 from app.storage.messages import MessageRepository
 
 
@@ -85,11 +92,15 @@ class ChatService:
         conversations: ConversationRepository,
         messages: MessageRepository,
         provider: AIProvider,
+        generated_images: GeneratedImageRepository | None = None,
+        image_generator: ImageGenerator | None = None,
     ) -> None:
         self.settings = settings
         self.conversations = conversations
         self.messages = messages
         self.provider = provider
+        self.generated_images = generated_images
+        self.image_generator = image_generator
         self.logger = logging.getLogger("app.domain.services")
         self._active_runs: dict[int, _ActiveRun] = {}
         self._active_runs_lock = asyncio.Lock()
@@ -123,14 +134,17 @@ class ChatService:
         try:
             try:
                 if message.message_type == "command":
-                    reply_text = await self._handle_command(message)
-                else:
-                    reply_text = await self._handle_chat_message(
+                    reply = await self._handle_command(
                         message,
                         responder=responder,
                         active_run=active_run,
                     )
-                reply = ServiceReply(text=reply_text)
+                else:
+                    reply = await self._handle_chat_message(
+                        message,
+                        responder=responder,
+                        active_run=active_run,
+                    )
             except _SupersededResponse:
                 self.logger.info(
                     log_kv(
@@ -143,6 +157,12 @@ class ChatService:
                 )
                 return ServiceReply(text="", suppressed=True)
             except (ProviderTimeoutError, ProviderUpstreamError) as exc:
+                provider_name, model_name = self._provider_context(message)
+                retry_text = (
+                    IMAGE_GENERATION_RETRY_TEXT
+                    if self._is_image_command(message)
+                    else PROVIDER_RETRY_TEXT
+                )
                 self.logger.warning(
                     log_kv(
                         "provider_failure",
@@ -150,12 +170,12 @@ class ChatService:
                         chat_id=message.chat_id,
                         user_id=message.user_id,
                         message_type=message.message_type,
-                        provider="openai",
-                        model=self.settings.openai_model,
+                        provider=provider_name,
+                        model=model_name,
                         error_type=type(exc).__name__,
                     )
                 )
-                reply = ServiceReply(text=PROVIDER_RETRY_TEXT, error_type=type(exc).__name__)
+                reply = ServiceReply(text=retry_text, error_type=type(exc).__name__)
             except StorageError:
                 self.logger.exception(
                     log_kv(
@@ -191,6 +211,7 @@ class ChatService:
                 return reply
 
             latency_ms = int((time.perf_counter() - started) * 1000)
+            provider_name, model_name = self._provider_context(message)
             self.logger.info(
                 log_kv(
                     "message_processed",
@@ -199,8 +220,8 @@ class ChatService:
                     user_id=message.user_id,
                     command=message.command,
                     message_type=message.message_type,
-                    provider="openai" if message.message_type != "command" else None,
-                    model=self.settings.openai_model if message.message_type != "command" else None,
+                    provider=provider_name,
+                    model=model_name,
                     latency_ms=latency_ms,
                     delivered=reply.delivered,
                 )
@@ -277,7 +298,7 @@ class ChatService:
         active_run: _ActiveRun | None,
         message: InboundMessage,
     ) -> ServiceReply:
-        if reply.suppressed or responder is None:
+        if reply.suppressed or responder is None or reply.delivered or not reply.text:
             return reply
         if active_run is not None and active_run.cancelled.is_set():
             self.logger.info(
@@ -298,13 +319,19 @@ class ChatService:
         reply.delivered = True
         return reply
 
-    async def _handle_command(self, message: InboundMessage) -> str:
+    async def _handle_command(
+        self,
+        message: InboundMessage,
+        *,
+        responder: ResponseEmitter | None,
+        active_run: _ActiveRun,
+    ) -> ServiceReply:
         command = (message.command or "").lower()
         if command == "/reset":
             conversation = await self.conversations.reset_active(message.chat_id)
             reply_text = render_reset_message()
             await self._persist_command_exchange(conversation, message, reply_text)
-            return reply_text
+            return ServiceReply(text=reply_text)
 
         conversation = await self.conversations.get_or_create_active(message.chat_id)
         if command == "/start":
@@ -314,8 +341,17 @@ class ChatService:
         elif command == "/status":
             reply_text = render_status_message(
                 update_mode=self.settings.app_update_mode,
-                model=self.settings.openai_model,
+                chat_model=self.settings.openai_model,
+                image_generation_enabled=self.settings.vertex_image_generation_enabled,
+                image_model=self.settings.vertex_image_model,
                 memory_enabled=self.settings.bot_history_max_turns > 0,
+            )
+        elif command == "/image":
+            return await self._handle_image_command(
+                conversation=conversation,
+                message=message,
+                responder=responder,
+                active_run=active_run,
             )
         elif command in SUPPORTED_COMMANDS:
             reply_text = render_help_message()
@@ -323,7 +359,79 @@ class ChatService:
             reply_text = "Unsupported command. Use /help."
 
         await self._persist_command_exchange(conversation, message, reply_text)
-        return reply_text
+        return ServiceReply(text=reply_text)
+
+    async def _handle_image_command(
+        self,
+        *,
+        conversation: ConversationRecord,
+        message: InboundMessage,
+        responder: ResponseEmitter | None,
+        active_run: _ActiveRun,
+    ) -> ServiceReply:
+        prompt = self._extract_image_prompt(message)
+        if prompt is None:
+            await self._persist_command_exchange(
+                conversation,
+                message,
+                IMAGE_PROMPT_REQUIRED_TEXT,
+            )
+            return ServiceReply(text=IMAGE_PROMPT_REQUIRED_TEXT)
+
+        await self._persist_user_command_message(conversation, message)
+
+        if responder is None:
+            reply_text = GENERIC_FAILURE_TEXT
+            await self._persist_command_reply(conversation, reply_text)
+            await self.conversations.touch(conversation.id)
+            return ServiceReply(text=reply_text)
+
+        if self.image_generator is None or self.generated_images is None:
+            await self._persist_command_reply(
+                conversation,
+                IMAGE_GENERATION_NOT_CONFIGURED_TEXT,
+            )
+            await self.conversations.touch(conversation.id)
+            return ServiceReply(text=IMAGE_GENERATION_NOT_CONFIGURED_TEXT)
+
+        try:
+            generated_image = await self.image_generator.generate_image(
+                ImageGenerationRequest(
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    prompt=prompt,
+                    model=self.settings.vertex_image_model,
+                    aspect_ratio=self.settings.vertex_image_aspect_ratio,
+                    output_mime_type=self.settings.vertex_image_output_mime_type,
+                )
+            )
+        except (ProviderTimeoutError, ProviderUpstreamError):
+            self.logger.warning(
+                log_kv(
+                    "image_generation_failed",
+                    update_id=message.update_id,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    provider="vertex",
+                    model=self.settings.vertex_image_model,
+                ),
+                exc_info=True,
+            )
+            await self._persist_command_reply(conversation, IMAGE_GENERATION_RETRY_TEXT)
+            await self.conversations.touch(conversation.id)
+            return ServiceReply(text=IMAGE_GENERATION_RETRY_TEXT)
+
+        if active_run.cancelled.is_set():
+            raise _SupersededResponse()
+
+        sent_photo = await responder.send_photo(generated_image)
+        await self._persist_generated_image_delivery(
+            conversation=conversation,
+            generated_image=generated_image,
+            sent_photo=sent_photo,
+        )
+        await self.conversations.touch(conversation.id)
+        return ServiceReply(text="", delivered=True)
 
     async def _persist_command_exchange(
         self,
@@ -331,14 +439,29 @@ class ChatService:
         message: InboundMessage,
         reply_text: str,
     ) -> None:
+        await self._persist_user_command_message(conversation, message)
+        await self._persist_command_reply(conversation, reply_text)
+        await self.conversations.touch(conversation.id)
+
+    async def _persist_user_command_message(
+        self,
+        conversation: ConversationRecord,
+        message: InboundMessage,
+    ) -> None:
         await self.messages.add_user_message(
             conversation_id=conversation.id,
             telegram_message_id=message.telegram_message_id,
             message_type="command",
-            text=message.command or message.text,
+            text=message.text or message.command,
             image=None,
             created_at=message.sent_at,
         )
+
+    async def _persist_command_reply(
+        self,
+        conversation: ConversationRecord,
+        reply_text: str,
+    ) -> None:
         await self.messages.add_assistant_message(
             conversation_id=conversation.id,
             provider_message_id=None,
@@ -346,7 +469,6 @@ class ChatService:
             message_type="command",
             created_at=_utcnow(),
         )
-        await self.conversations.touch(conversation.id)
 
     async def _handle_chat_message(
         self,
@@ -354,7 +476,7 @@ class ChatService:
         *,
         responder: ResponseEmitter | None,
         active_run: _ActiveRun,
-    ) -> str:
+    ) -> ServiceReply:
         conversation = await self.conversations.get_or_create_active(message.chat_id)
         history = []
         if self.settings.bot_history_max_turns > 0:
@@ -490,7 +612,7 @@ class ChatService:
                     message=message,
                 )
 
-            return reply_text
+            return ServiceReply(text=reply_text)
         except Exception:
             if draft_session is not None:
                 await self._cancel_draft_session(
@@ -498,6 +620,65 @@ class ChatService:
                     message=message,
                 )
             raise
+
+    def _extract_image_prompt(self, message: InboundMessage) -> str | None:
+        if message.text is None:
+            return None
+        parts = message.text.split(maxsplit=1)
+        if len(parts) < 2:
+            return None
+        prompt = parts[1].strip()
+        return prompt or None
+
+    async def _persist_generated_image_delivery(
+        self,
+        *,
+        conversation: ConversationRecord,
+        generated_image: GeneratedImageResult,
+        sent_photo: SentPhoto,
+    ) -> None:
+        try:
+            await self.messages.add_assistant_message(
+                conversation_id=conversation.id,
+                provider_message_id=None,
+                text=None,
+                message_type="generated_image",
+                created_at=_utcnow(),
+            )
+            if self.generated_images is not None:
+                await self.generated_images.add_generated_image(
+                    conversation_id=conversation.id,
+                    prompt_text=generated_image.prompt,
+                    provider=generated_image.provider,
+                    model=generated_image.raw_model,
+                    mime_type=generated_image.mime_type,
+                    telegram_message_id=sent_photo.telegram_message_id,
+                    telegram_file_id=sent_photo.telegram_file_id,
+                    telegram_file_unique_id=sent_photo.telegram_file_unique_id,
+                    width=sent_photo.width,
+                    height=sent_photo.height,
+                    file_size=sent_photo.file_size,
+                    created_at=_utcnow(),
+                )
+        except StorageError:
+            self.logger.exception(
+                log_kv(
+                    "generated_image_metadata_persist_failed",
+                    chat_id=conversation.chat_id,
+                    provider=generated_image.provider,
+                    model=generated_image.raw_model,
+                )
+            )
+
+    def _provider_context(self, message: InboundMessage) -> tuple[str | None, str | None]:
+        if self._is_image_command(message):
+            return ("vertex", self.settings.vertex_image_model)
+        if message.message_type != "command":
+            return ("openai", self.settings.openai_model)
+        return (None, None)
+
+    def _is_image_command(self, message: InboundMessage) -> bool:
+        return message.message_type == "command" and (message.command or "").lower() == "/image"
 
     def _drafts_enabled(
         self,

@@ -67,6 +67,21 @@ class Settings(BaseSettings):
         default=80,
         alias="BOT_DRAFT_MIN_CHARS_DELTA",
     )
+    vertex_api_key: SecretStr | None = Field(default=None, alias="VERTEX_API_KEY")
+    vertex_project_id: str | None = Field(default=None, alias="VERTEX_PROJECT_ID")
+    vertex_location: str = Field(default="us-central1", alias="VERTEX_LOCATION")
+    vertex_image_model: str = Field(
+        default="imagen-4.0-fast-generate-001",
+        alias="VERTEX_IMAGE_MODEL",
+    )
+    vertex_image_aspect_ratio: str = Field(
+        default="1:1",
+        alias="VERTEX_IMAGE_ASPECT_RATIO",
+    )
+    vertex_image_output_mime_type: str = Field(
+        default="image/jpeg",
+        alias="VERTEX_IMAGE_OUTPUT_MIME_TYPE",
+    )
 
     @field_validator("app_update_mode")
     @classmethod
@@ -102,6 +117,25 @@ class Settings(BaseSettings):
             raise ValueError("draft streaming settings must be zero or greater")
         return value
 
+    @field_validator(
+        "vertex_project_id",
+        "vertex_location",
+        "vertex_image_model",
+        "vertex_image_aspect_ratio",
+        "vertex_image_output_mime_type",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_strings(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
     @property
     def allowed_user_ids(self) -> set[int]:
         return {int(part) for part in self.telegram_allowed_user_ids.split(",") if part}
+
+    @property
+    def vertex_image_generation_enabled(self) -> bool:
+        return self.vertex_api_key is not None or self.vertex_project_id is not None

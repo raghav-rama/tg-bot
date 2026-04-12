@@ -47,6 +47,28 @@ SCHEMA_STATEMENTS = (
     CREATE INDEX IF NOT EXISTS idx_messages_conversation_created
     ON messages(conversation_id, created_at)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS generated_images (
+        id INTEGER PRIMARY KEY,
+        conversation_id INTEGER NOT NULL,
+        prompt_text TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        telegram_message_id INTEGER NULL,
+        telegram_file_id TEXT NULL,
+        telegram_file_unique_id TEXT NULL,
+        width INTEGER NULL,
+        height INTEGER NULL,
+        file_size INTEGER NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (conversation_id) REFERENCES conversations (id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_generated_images_conversation_created
+    ON generated_images(conversation_id, created_at)
+    """,
 )
 
 
@@ -103,4 +125,3 @@ class Database:
                 raise
             else:
                 await connection.commit()
-

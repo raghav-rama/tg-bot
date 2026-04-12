@@ -73,7 +73,7 @@ class MessageRepository:
         *,
         conversation_id: int,
         provider_message_id: str | None,
-        text: str,
+        text: str | None,
         message_type: str = "text",
         created_at: datetime | None = None,
     ) -> int:

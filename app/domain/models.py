@@ -130,6 +130,53 @@ class StoredMessage:
 
 
 @dataclass(slots=True)
+class ImageGenerationRequest:
+    chat_id: int
+    user_id: int
+    prompt: str
+    model: str
+    aspect_ratio: str
+    output_mime_type: str
+
+
+@dataclass(slots=True)
+class GeneratedImageResult:
+    image_bytes: bytes
+    mime_type: str
+    provider: str
+    raw_model: str
+    prompt: str
+    caption: str | None = None
+
+
+@dataclass(slots=True)
+class SentPhoto:
+    telegram_message_id: int
+    telegram_file_id: str
+    telegram_file_unique_id: str
+    width: int
+    height: int
+    file_size: int | None
+
+
+@dataclass(slots=True)
+class StoredGeneratedImage:
+    id: int
+    conversation_id: int
+    prompt_text: str
+    provider: str
+    model: str
+    mime_type: str
+    telegram_message_id: int | None
+    telegram_file_id: str | None
+    telegram_file_unique_id: str | None
+    width: int | None
+    height: int | None
+    file_size: int | None
+    created_at: datetime
+
+
+@dataclass(slots=True)
 class ServiceReply:
     text: str
     error_type: str | None = None

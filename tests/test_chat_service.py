@@ -4,9 +4,9 @@ import asyncio
 from datetime import datetime, timezone
 
 from app.config import Settings
-from app.domain.commands import ACCESS_DENIED_TEXT
+from app.domain.commands import ACCESS_DENIED_TEXT, IMAGE_GENERATION_RETRY_TEXT
 from app.domain.errors import DraftRateLimitedError, ProviderTimeoutError
-from app.domain.models import ImageInput, InboundMessage, StreamingProviderEvent
+from app.domain.models import ImageInput, InboundMessage, SentPhoto, StreamingProviderEvent
 
 
 def utc_datetime() -> datetime:
@@ -31,6 +31,7 @@ def make_text_message(*, user_id: int, chat_id: int, text: str, update_id: int =
 
 
 def make_command_message(*, user_id: int, chat_id: int, command: str, update_id: int = 1) -> InboundMessage:
+    command_name = command.split(maxsplit=1)[0].split("@", maxsplit=1)[0].lower()
     return InboundMessage(
         update_id=update_id,
         telegram_message_id=update_id,
@@ -41,7 +42,7 @@ def make_command_message(*, user_id: int, chat_id: int, command: str, update_id:
         first_name="Ritz",
         message_type="command",
         text=command,
-        command=command,
+        command=command_name,
         image=None,
         sent_at=utc_datetime(),
     )
@@ -115,11 +116,24 @@ class FakeDraftSession:
 class FakeResponseEmitter:
     def __init__(self, *, draft_session: FakeDraftSession | None = None) -> None:
         self.sent_texts: list[str] = []
+        self.sent_photos: list[bytes] = []
         self.draft_session = draft_session or FakeDraftSession()
         self.open_calls = 0
+        self.photo_result = SentPhoto(
+            telegram_message_id=9001,
+            telegram_file_id="tg-photo-1",
+            telegram_file_unique_id="tg-photo-uniq-1",
+            width=1024,
+            height=1024,
+            file_size=2048,
+        )
 
     async def send_text(self, text: str) -> None:
         self.sent_texts.append(text)
+
+    async def send_photo(self, image) -> SentPhoto:
+        self.sent_photos.append(image.image_bytes)
+        return self.photo_result
 
     async def open_draft(self) -> FakeDraftSession:
         self.open_calls += 1
@@ -221,6 +235,99 @@ async def test_reset_starts_fresh_conversation_without_deleting_prior_history(se
     assert archived_row["count"] == 1
     assert len(first_messages) == 2
     assert len(second_messages) == 4
+
+
+async def test_image_command_generates_photo_and_persists_metadata(service_bundle) -> None:
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    generated_images = service_bundle["generated_images"]
+    image_generator = service_bundle["image_generator"]
+    emitter = FakeResponseEmitter()
+
+    reply = await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=210,
+            command="/image cinematic poster of a fox astronaut",
+            update_id=4,
+        ),
+        responder=emitter,
+    )
+    conversation = await conversations.get_active(210)
+
+    assert reply.text == ""
+    assert reply.delivered is True
+    assert len(image_generator.calls) == 1
+    assert emitter.sent_texts == []
+    assert emitter.sent_photos == [b"generated-image"]
+    assert conversation is not None
+
+    stored_images = await generated_images.list_for_conversation(conversation.id)
+    assert len(stored_images) == 1
+    assert stored_images[0].prompt_text == "cinematic poster of a fox astronaut"
+    assert stored_images[0].provider == "vertex"
+    assert stored_images[0].telegram_file_id == "tg-photo-1"
+    assert stored_images[0].model == service.settings.vertex_image_model
+
+
+async def test_image_command_requires_prompt(service_bundle) -> None:
+    service = service_bundle["service"]
+    emitter = FakeResponseEmitter()
+
+    reply = await service.handle_inbound(
+        make_command_message(user_id=42, chat_id=211, command="/image", update_id=5),
+        responder=emitter,
+    )
+
+    assert reply.text.startswith("Use /image followed by a prompt")
+    assert reply.delivered is True
+    assert emitter.sent_texts == [reply.text]
+    assert emitter.sent_photos == []
+
+
+async def test_image_command_provider_failure_returns_retry_text(service_bundle) -> None:
+    service = service_bundle["service"]
+    image_generator = service_bundle["image_generator"]
+    emitter = FakeResponseEmitter()
+
+    image_generator.error = ProviderTimeoutError("timed out")
+
+    reply = await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=212,
+            command="/image rainy alley with cinematic lights",
+            update_id=6,
+        ),
+        responder=emitter,
+    )
+
+    assert reply.text == IMAGE_GENERATION_RETRY_TEXT
+    assert reply.delivered is True
+    assert emitter.sent_texts == [IMAGE_GENERATION_RETRY_TEXT]
+    assert emitter.sent_photos == []
+
+
+async def test_image_command_returns_not_configured_when_generator_missing(service_bundle) -> None:
+    service = service_bundle["service"]
+    emitter = FakeResponseEmitter()
+
+    service.image_generator = None
+
+    reply = await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=213,
+            command="/image charcoal sketch of a lighthouse",
+            update_id=7,
+        ),
+        responder=emitter,
+    )
+
+    assert reply.text == "Image generation is not configured right now."
+    assert reply.delivered is True
+    assert emitter.sent_texts == ["Image generation is not configured right now."]
+    assert emitter.sent_photos == []
 
 
 async def test_text_message_streams_drafts_and_delivers_final_reply(service_bundle) -> None:

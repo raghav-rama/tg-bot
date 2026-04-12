@@ -7,10 +7,11 @@ from pathlib import Path
 import pytest_asyncio
 
 from app.config import Settings
-from app.domain.models import ProviderResponse, StreamingProviderEvent
+from app.domain.models import GeneratedImageResult, ProviderResponse, StreamingProviderEvent
 from app.domain.services import ChatService
 from app.storage.conversations import ConversationRepository
 from app.storage.db import Database
+from app.storage.generated_images import GeneratedImageRepository
 from app.storage.messages import MessageRepository
 
 
@@ -70,6 +71,28 @@ class FakeProvider:
         return None
 
 
+class FakeImageGenerator:
+    def __init__(self, *, image_bytes: bytes = b"generated-image") -> None:
+        self.image_bytes = image_bytes
+        self.calls = []
+        self.error: Exception | None = None
+
+    async def generate_image(self, request):
+        self.calls.append(request)
+        if self.error is not None:
+            raise self.error
+        return GeneratedImageResult(
+            image_bytes=self.image_bytes,
+            mime_type=request.output_mime_type,
+            provider="vertex",
+            raw_model=request.model,
+            prompt=request.prompt,
+        )
+
+    async def close(self) -> None:
+        return None
+
+
 def build_settings(database_path: Path, **overrides) -> Settings:
     values = {
         "TELEGRAM_BOT_TOKEN": "test-token",
@@ -78,6 +101,7 @@ def build_settings(database_path: Path, **overrides) -> Settings:
         "APP_UPDATE_MODE": "webhook",
         "SQLITE_PATH": str(database_path),
         "OPENAI_MODEL": "gpt-4.1-mini",
+        "VERTEX_PROJECT_ID": "test-project",
         "BOT_ENABLE_MESSAGE_DRAFTS": "true",
         "BOT_DRAFT_STREAM_ON_IMAGES": "false",
         "BOT_DRAFT_START_DELAY_MS": "750",
@@ -97,12 +121,16 @@ async def service_bundle(tmp_path):
 
     conversations = ConversationRepository(database)
     messages = MessageRepository(database)
+    generated_images = GeneratedImageRepository(database)
     provider = FakeProvider()
+    image_generator = FakeImageGenerator()
     service = ChatService(
         settings=settings,
         conversations=conversations,
         messages=messages,
         provider=provider,
+        generated_images=generated_images,
+        image_generator=image_generator,
     )
 
     yield {
@@ -110,7 +138,9 @@ async def service_bundle(tmp_path):
         "database": database,
         "conversations": conversations,
         "messages": messages,
+        "generated_images": generated_images,
         "provider": provider,
+        "image_generator": image_generator,
         "service": service,
     }
 

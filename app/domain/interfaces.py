@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from app.domain.models import GeneratedImageResult, SentPhoto
+
 
 class DraftSession(Protocol):
     draft_id: int
@@ -19,6 +21,9 @@ class DraftSession(Protocol):
 class ResponseEmitter(Protocol):
     async def send_text(self, text: str) -> None:
         """Deliver the final text reply."""
+
+    async def send_photo(self, image: GeneratedImageResult) -> SentPhoto:
+        """Deliver a generated photo reply."""
 
     async def open_draft(self) -> DraftSession:
         """Allocate a draft session for partial updates."""

@@ -39,6 +39,29 @@ def test_normalize_text_message() -> None:
     assert inbound.user_id == 42
 
 
+def test_normalize_image_command_keeps_full_text() -> None:
+    update = build_update(
+        {
+            "message_id": 13,
+            "date": 1_776_000_000,
+            "chat": {"id": 123, "type": "private"},
+            "from": {"id": 42, "is_bot": False, "first_name": "Ritz", "username": "ritz"},
+            "text": "/image watercolor fox in a flower field",
+        }
+    )
+
+    inbound = normalize_message(
+        message=update.message,
+        update_id=update.update_id,
+        image_bytes=None,
+        image_max_bytes=1024,
+    )
+
+    assert inbound.message_type == "command"
+    assert inbound.command == "/image"
+    assert inbound.text == "/image watercolor fox in a flower field"
+
+
 def test_normalize_photo_message() -> None:
     update = build_update(
         {
@@ -110,4 +133,3 @@ def test_normalize_unsupported_message_type() -> None:
         assert exc.__class__.__name__ == "UnsupportedMessageError"
     else:
         raise AssertionError("Expected UnsupportedMessageError")
-

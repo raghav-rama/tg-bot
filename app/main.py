@@ -12,10 +12,12 @@ from app.api.webhook import router as webhook_router
 from app.config import Settings
 from app.domain.services import ChatService
 from app.logging import configure_logging, log_kv
-from app.providers.base import AIProvider
+from app.providers.base import AIProvider, ImageGenerator
 from app.providers.openai_provider import OpenAIProvider
+from app.providers.vertex_image_provider import VertexImageProvider
 from app.storage.conversations import ConversationRepository
 from app.storage.db import Database
+from app.storage.generated_images import GeneratedImageRepository
 from app.storage.messages import MessageRepository
 from app.telegram.handlers import TelegramUpdateProcessor
 from app.telegram.polling import TelegramRuntime
@@ -27,7 +29,9 @@ class AppContainer:
     database: Database | None = None
     conversations: ConversationRepository | None = None
     messages: MessageRepository | None = None
+    generated_images: GeneratedImageRepository | None = None
     provider: AIProvider | None = None
+    image_generator: ImageGenerator | None = None
     chat_service: ChatService | None = None
     telegram_runtime: TelegramRuntime | None = None
     startup_error: str | None = None
@@ -52,15 +56,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             conversations = ConversationRepository(database)
             messages = MessageRepository(database)
+            generated_images = GeneratedImageRepository(database)
             provider = OpenAIProvider(
                 api_key=loaded_settings.openai_api_key.get_secret_value(),
                 timeout_seconds=loaded_settings.openai_timeout_seconds,
             )
+            image_generator = None
+            if loaded_settings.vertex_image_generation_enabled:
+                image_generator = VertexImageProvider(
+                    api_key=(
+                        loaded_settings.vertex_api_key.get_secret_value()
+                        if loaded_settings.vertex_api_key is not None
+                        else None
+                    ),
+                    project=loaded_settings.vertex_project_id or "",
+                    location=loaded_settings.vertex_location,
+                    default_model=loaded_settings.vertex_image_model,
+                    default_aspect_ratio=loaded_settings.vertex_image_aspect_ratio,
+                    default_output_mime_type=loaded_settings.vertex_image_output_mime_type,
+                )
             chat_service = ChatService(
                 settings=loaded_settings,
                 conversations=conversations,
                 messages=messages,
                 provider=provider,
+                generated_images=generated_images,
+                image_generator=image_generator,
             )
             processor = TelegramUpdateProcessor(
                 chat_service=chat_service,
@@ -78,7 +99,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 database=database,
                 conversations=conversations,
                 messages=messages,
+                generated_images=generated_images,
                 provider=provider,
+                image_generator=image_generator,
                 chat_service=chat_service,
                 telegram_runtime=telegram_runtime,
             )
@@ -109,6 +132,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await shutdown_container.telegram_runtime.close()
             if shutdown_container.provider is not None:
                 await shutdown_container.provider.close()
+            if shutdown_container.image_generator is not None:
+                await shutdown_container.image_generator.close()
             if shutdown_container.database is not None:
                 await shutdown_container.database.close()
 

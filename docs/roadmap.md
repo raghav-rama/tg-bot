@@ -5,36 +5,37 @@
 This document separates the current repo state from the planned delivery phases.
 
 - `architecture.md`, `flows.md`, and `implementation-plan.md` define the Phase 1 build only.
-- `phase-1-5-draft-streaming.md` defines the planned Phase 1.5 draft-streaming enhancement only.
-- This roadmap tracks the broader direction, especially the later Google Gemini / Vertex AI media-generation work.
+- `phase-1-5-draft-streaming.md` defines the Phase 1.5 draft-streaming work only.
+- `phase-2-vertex-image-generation.md` defines the active Phase 2 image-generation work only.
+- This roadmap tracks the broader direction, especially the later Vertex video-generation work.
 
 ## Current Phase
 
-- Active phase: `Phase 1.5 - Telegram Partial Reply Streaming`
+- Active phase: `Phase 2 - Vertex Image Generation`
 - Status: `in_progress`
 - Last updated: `2026-04-12`
-- Exit criteria source: `Phase 1.5 - Telegram Partial Reply Streaming`
+- Exit criteria source: `Phase 2 - Vertex Image Generation`
 - Evidence:
-  - Phase 1 foundation work is accepted as complete for repo sequencing and no longer blocks the next milestone
-  - Phase 1.5 code now exists under `app/` for OpenAI streamed responses, Telegram draft delivery, and per-chat in-flight cancellation
-  - automated checks now cover draft streaming, draft fallback, supersession, provider-failure persistence, and the earlier Phase 1 behaviors
-  - live Telegram/OpenAI runtime verification found that aggressive `sendMessageDraft` updates can trigger per-chat flood control, so the repo now needs conservative default throttling
-  - a Telegram-specific final-message formatter now converts a safe subset of model markdown into Telegram HTML while draft updates remain plain text
-  - client confirmation that drafts disappear cleanly after final handoff is still pending
-  - Google Gemini / Vertex AI media generation remains planned work, not current repo behavior
+  - Phase 1 foundation work is accepted as complete for repo sequencing
+  - Phase 1.5 draft streaming is accepted as complete and no longer blocks the next milestone
+  - an explicit `/image` command path now exists alongside the existing OpenAI chat flow
+  - generated image delivery now uses Telegram `sendPhoto` through the Telegram adapter
+  - generated-image prompt and Telegram file metadata are now persisted separately from chat history in SQLite
+  - OpenAI text and image-understanding chat remains unchanged while Vertex image generation is added as a separate path
+  - live Vertex and Telegram runtime verification for the new `/image` flow is still pending
 
 ## Current State
 
-As of 2026-04-11, this repository contains the completed Phase 1 foundation plus an in-progress, text-first Phase 1.5 draft-streaming implementation.
+As of `2026-04-12`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, and an in-progress Phase 2 image-generation slice.
 
-- Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, and the OpenAI adapter.
+- Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, OpenAI chat, and Vertex image generation.
 - A polling-first runtime exists, while the webhook route remains reserved behind the same shared processing path.
 - SQLite-backed conversation memory, command handling, allowlist checks, and text plus single-image inbound normalization are implemented.
-- OpenAI response streaming, in-memory Telegram draft sessions, and per-chat supersession handling now exist for Phase 1.5.
-- Draft streaming is currently enabled for private text chats; image-understanding requests remain on the final-only path by default.
-- Final Telegram replies now normalize a safe subset of model markdown into Telegram-safe HTML, with a plain-text retry path if Telegram rejects the formatted message.
-- Tests exist under `tests/` for health/readiness behavior, normalization, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, explicit draft rate-limit fallback, provider cleanup, and supersession.
-- Real Telegram client validation of final draft cleanup is still pending.
+- OpenAI response streaming, in-memory Telegram draft sessions, and per-chat supersession handling are implemented and accepted as complete for Phase 1.5.
+- `/image <prompt>` now generates one image through Vertex AI and sends it back through Telegram `sendPhoto`.
+- Generated-image metadata is stored in SQLite without persisting raw image bytes.
+- Tests exist under `tests/` for health and readiness behavior, normalization, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, supersession, Telegram formatting, and the new image-generation flow.
+- Real Vertex and Telegram verification still depends on configured credentials and a manual runtime check.
 
 ## Recommended Sequencing
 
@@ -87,7 +88,7 @@ Phase 1 is done when:
 
 ## Phase 1.5 - Telegram Partial Reply Streaming
 
-Status: `in_progress`
+Status: `complete`
 
 Dedicated planning doc: [phase-1-5-draft-streaming.md](phase-1-5-draft-streaming.md)
 
@@ -95,29 +96,20 @@ Dedicated planning doc: [phase-1-5-draft-streaming.md](phase-1-5-draft-streaming
 
 Let the bot show partial assistant text in Telegram while a long reply is still being generated.
 
-### Proposed Scope
+### Completed Scope
 
 - use Telegram Bot API `sendMessageDraft` for partial reply updates
 - keep the final assistant response as a normal text message
 - add provider-side text streaming for the existing OpenAI path
 - keep partial draft state in memory only
 - degrade safely to final-only replies when draft streaming fails
-- start with private text-input replies first; keep image-understanding replies on the final-only path unless widened later
+- start with private text-input replies first; keep image-understanding replies on the final-only path by default
 
-### Design Notes
+### Completion Notes
 
-- Telegram documents `sendMessageDraft` for target private chats, which fits the current private-bot scope.
-- `aiogram` already exposes `sendMessageDraft`, so the main work is service orchestration rather than framework patching.
-- The Bot API docs describe how to send draft updates, but the final cleanup behavior still needs real-client validation.
-- Telegram formatting should be handled in the Telegram adapter: convert common model markdown to safe final-message HTML, keep drafts plain text first, and retry as plain text if Telegram rejects formatted output.
-- This is a UX enhancement and should not expand supported input or output types.
-
-### New Decisions Needed
-
-- whether to widen Phase 1.5 beyond the current text-first rollout and stream image-understanding replies too
-- how aggressively draft updates should be throttled
-- how to handle a new incoming user message while an older response is still streaming
-- whether the first Telegram formatter pass needs support beyond headings, emphasis, lists, code, and links
+- Telegram draft update cadence now defaults to conservative thresholds because aggressive updates were shown to trigger per-chat flood control during live validation.
+- Final Telegram replies now pass through a Telegram-specific formatter that converts a safe subset of model markdown into Telegram HTML.
+- Phase completion assumes the remaining real-client draft cleanup question was resolved outside the repo and accepted for sequencing.
 
 ### Exit Criteria
 
@@ -131,34 +123,37 @@ Phase 1.5 is done when:
 
 ## Phase 2 - Vertex Image Generation
 
-Status: `not_started`
+Status: `in_progress`
+
+Dedicated planning doc: [phase-2-vertex-image-generation.md](phase-2-vertex-image-generation.md)
 
 ### Goal
 
 Let the bot generate images and send them back to Telegram.
 
-### Proposed Scope
+### Current Scope
 
 - add a Google Gen AI / Vertex AI client path using the Python `google-genai` SDK
 - keep chat flow separate from image-generation flow
-- introduce an explicit bot entrypoint for image generation such as `/image`
+- introduce an explicit bot entrypoint for image generation through `/image <prompt>`
 - return one generated image per request first
 - send generated output back through Telegram `sendPhoto`
 - persist prompt metadata and generated asset references, not raw binary blobs in SQLite
 
 ### Design Notes
 
-- Start with Vertex AI rather than a direct Gemini Developer API integration so project, region, and operational controls stay in one Google Cloud path.
-- Start with Gemini image generation on Vertex AI because it fits a conversational bot flow and supports text-plus-image style generation in one response path.
-- If image quality, typography, or brand control becomes more important than conversational flow, evaluate Imagen later as a separate decision instead of mixing that into the first image milestone.
-- Keep generation routing out of Telegram handler code. Telegram should only normalize input and deliver output.
+- Keep chat on OpenAI while image generation lives on Vertex AI.
+- The current implementation starts with Imagen on Vertex AI through the dedicated `generate_images` SDK path.
+- The implementation now supports a Vertex API key for testing and can still fall back to ADC when that key is not configured.
+- This is an intentional Phase 2 implementation choice: current official Vertex docs expose a straightforward Python image-generation API for Imagen, while Gemini image generation on Vertex AI is still documented as preview and requires mixed `TEXT` plus `IMAGE` output.
+- Telegram handler code should continue to normalize inbound updates and deliver outbound media only. Generation routing stays in the domain and provider layers.
 
 ### New Decisions Needed
 
-- whether chat stays on OpenAI while image generation lives on Vertex AI
-- whether image generation should be command-based (`/image`) or mode-based
-- where generated assets live before and after Telegram delivery
-- whether generated images should be reusable across chats by storing a Telegram `file_id`
+- whether generated images should be reusable across chats by storing and reusing Telegram `file_id`
+- whether successful `/image` generations should also write a richer assistant summary row into chat history
+- whether Phase 2 should later widen from simple prompt-to-image into image editing or variation flows
+- whether Gemini image generation should be evaluated later once its API surface stabilizes for production use
 
 ### Exit Criteria
 
@@ -238,9 +233,8 @@ These choices should be made before coding gets too far:
 - Telegram bots overview: https://core.telegram.org/bots
 - Telegram Bot API: https://core.telegram.org/bots/api
 - Telegram Bot API `sendMessageDraft`: https://core.telegram.org/bots/api#sendmessagedraft
-- Telegram message drafts overview: https://core.telegram.org/api/drafts
-- aiogram API docs: https://docs.aiogram.dev/en/latest/api/index.html
-- aiogram `sendMessageDraft`: https://docs.aiogram.dev/en/latest/api/methods/send_message_draft.html
-- Vertex AI Gemini image generation: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/image-generation
-- Vertex AI Veo overview: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/video/overview
-- Google Gen AI Python SDK: https://googleapis.github.io/python-genai/
+- Telegram Bot API `sendPhoto`: https://core.telegram.org/bots/api#sendphoto
+- Vertex AI quickstart: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start
+- Vertex AI API keys: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/api-keys
+- Vertex AI image generation overview: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/image/overview
+- Google Gen AI SDK overview: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/sdks/overview

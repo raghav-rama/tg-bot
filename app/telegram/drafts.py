@@ -6,9 +6,11 @@ import logging
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+from aiogram.types import BufferedInputFile
 
 from app.domain.errors import DraftRateLimitedError
 from app.domain.interfaces import DraftSession, ResponseEmitter
+from app.domain.models import GeneratedImageResult, SentPhoto
 from app.logging import log_kv
 from app.telegram.formatting import render_telegram_html
 
@@ -88,6 +90,29 @@ class TelegramResponseEmitter:
                 text=text,
                 parse_mode=None,
             )
+
+    async def send_photo(self, image: GeneratedImageResult) -> SentPhoto:
+        extension = ".jpg" if image.mime_type == "image/jpeg" else ".png"
+        message = await self.bot.send_photo(
+            chat_id=self.chat_id,
+            photo=BufferedInputFile(
+                image.image_bytes,
+                filename=f"generated{extension}",
+            ),
+            caption=image.caption,
+        )
+        if not message.photo:
+            raise RuntimeError("Telegram did not return photo sizes for the sent image")
+
+        largest = message.photo[-1]
+        return SentPhoto(
+            telegram_message_id=message.message_id,
+            telegram_file_id=largest.file_id,
+            telegram_file_unique_id=largest.file_unique_id,
+            width=largest.width,
+            height=largest.height,
+            file_size=largest.file_size,
+        )
 
     async def open_draft(self) -> DraftSession:
         draft_id = next(self._draft_ids)

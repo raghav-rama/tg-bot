@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-SUPPORTED_COMMANDS = {"/start", "/help", "/status", "/reset"}
+SUPPORTED_COMMANDS = {"/start", "/help", "/status", "/reset", "/image"}
 
 ACCESS_DENIED_TEXT = "Access denied."
 UNSUPPORTED_MESSAGE_TEXT = (
@@ -11,6 +11,13 @@ PROVIDER_RETRY_TEXT = (
 )
 GENERIC_FAILURE_TEXT = "Something went wrong. Please try again in a moment."
 EMPTY_TEXT_TEXT = "Please send a non-empty text message."
+IMAGE_PROMPT_REQUIRED_TEXT = (
+    "Use /image followed by a prompt, for example: /image cinematic neon city skyline at night"
+)
+IMAGE_GENERATION_NOT_CONFIGURED_TEXT = "Image generation is not configured right now."
+IMAGE_GENERATION_RETRY_TEXT = (
+    "I couldn't generate an image just now. Please try again in a moment."
+)
 
 
 def render_start_message() -> str:
@@ -18,12 +25,14 @@ def render_start_message() -> str:
         "This is a private, memory-enabled bot.\n\n"
         "Supported inputs:\n"
         "- text messages\n"
-        "- one photo with an optional caption\n\n"
+        "- one photo with an optional caption\n"
+        "- /image followed by a prompt to generate one image\n\n"
         "Commands:\n"
         "/start\n"
         "/help\n"
         "/status\n"
-        "/reset"
+        "/reset\n"
+        "/image <prompt>"
     )
 
 
@@ -33,7 +42,8 @@ def render_help_message() -> str:
         "/start - show the bot overview\n"
         "/help - show this help message\n"
         "/status - show runtime status\n"
-        "/reset - start a fresh conversation for this chat\n\n"
+        "/reset - start a fresh conversation for this chat\n"
+        "/image <prompt> - generate one image with Vertex AI\n\n"
         "Supported inputs:\n"
         "- text messages\n"
         "- one photo with an optional caption\n\n"
@@ -41,12 +51,21 @@ def render_help_message() -> str:
     )
 
 
-def render_status_message(update_mode: str, model: str, memory_enabled: bool) -> str:
+def render_status_message(
+    *,
+    update_mode: str,
+    chat_model: str,
+    image_generation_enabled: bool,
+    image_model: str,
+    memory_enabled: bool,
+) -> str:
     memory_state = "enabled" if memory_enabled else "disabled"
+    image_state = f"enabled ({image_model})" if image_generation_enabled else "disabled"
     return (
         "Status\n"
         f"- update mode: {update_mode}\n"
-        f"- model: {model}\n"
+        f"- chat model: {chat_model}\n"
+        f"- image generation: {image_state}\n"
         f"- memory: {memory_state}"
     )
 
