@@ -1,8 +1,8 @@
 [project]
 name = "tg-bot"
 version = "0.1.0"
-description = "Phase 1 private Telegram bot with FastAPI, SQLite memory, and OpenAI replies."
-readme = "docs/roadmap.md"
+description = "Private Telegram bot with FastAPI, SQLite memory, OpenAI chat, and Vertex AI image/video generation."
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "aiogram>=3.26.0,<4.0.0",

@@ -13,11 +13,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
+COPY README.md ./
 
 RUN uv sync --no-dev --no-install-project --no-editable
 
 COPY app ./app
-COPY docs/roadmap.md ./docs/roadmap.md
 
 RUN uv sync --locked --no-dev --no-editable
 

@@ -24,10 +24,11 @@ The current repo plan is active Phase 3 Vertex video generation.
 
 ## Current State
 
-As of `2026-04-12`, the repository is no longer docs-only. Phase 1, Phase 1.5, and Phase 2 are accepted as complete, and Phase 3 video-generation work is now in progress.
+As of `2026-04-14`, the repository is no longer docs-only. Phase 1, Phase 1.5, and Phase 2 are accepted as complete, and Phase 3 video-generation work is now in progress.
 
 - Phase 1 foundation code exists under `app/`.
 - Project metadata and dependency definitions exist in `pyproject.toml` and `uv.lock`.
+- A repo-level `README.md` now exists and documents setup, configuration, runtime modes, and current phase status.
 - Container build assets now exist through a repo-level `Dockerfile` and `.dockerignore`.
 - Phase 1.5 code exists for OpenAI streamed responses, Telegram draft delivery, Telegram-safe final-message formatting, and per-chat supersession handling.
 - Phase 2 code now exists for `/image <prompt>`, Vertex image generation through the Python `google-genai` SDK path, Telegram photo delivery, and SQLite persistence of generated-image metadata.
