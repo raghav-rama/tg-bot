@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,6 +15,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "Keep responses practical and safe. "
     "If the request is underspecified, ask one brief follow-up question."
 )
+WEBHOOK_SECRET_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 
 
 class Settings(BaseSettings):
@@ -29,6 +32,18 @@ class Settings(BaseSettings):
     app_env: str = Field(default="development", alias="APP_ENV")
     app_log_level: str = Field(default="INFO", alias="APP_LOG_LEVEL")
     app_update_mode: str = Field(default="polling", alias="APP_UPDATE_MODE")
+    telegram_webhook_url: str | None = Field(
+        default=None,
+        alias="TELEGRAM_WEBHOOK_URL",
+    )
+    telegram_webhook_secret_token: SecretStr | None = Field(
+        default=None,
+        alias="TELEGRAM_WEBHOOK_SECRET_TOKEN",
+    )
+    telegram_webhook_drop_pending_updates: bool = Field(
+        default=False,
+        alias="TELEGRAM_WEBHOOK_DROP_PENDING_UPDATES",
+    )
     sqlite_path: Path = Field(default=Path("./data/bot.db"), alias="SQLITE_PATH")
     openai_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_MODEL")
     openai_temperature: float = Field(default=0.2, alias="OPENAI_TEMPERATURE")
@@ -153,6 +168,7 @@ class Settings(BaseSettings):
         "vertex_image_model",
         "vertex_image_aspect_ratio",
         "vertex_image_output_mime_type",
+        "telegram_webhook_url",
         "vertex_video_model",
         "vertex_video_aspect_ratio",
         "vertex_video_output_gcs_uri",
@@ -164,6 +180,47 @@ class Settings(BaseSettings):
             return None
         normalized = value.strip()
         return normalized or None
+
+    @field_validator("telegram_webhook_secret_token", mode="before")
+    @classmethod
+    def normalize_optional_secret(
+        cls,
+        value: SecretStr | str | None,
+    ) -> str | None:
+        if value is None:
+            return None
+        secret = (
+            value.get_secret_value()
+            if isinstance(value, SecretStr)
+            else str(value)
+        ).strip()
+        return secret or None
+
+    @field_validator("telegram_webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlparse(value)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("TELEGRAM_WEBHOOK_URL must be a valid HTTPS URL")
+        return value
+
+    @field_validator("telegram_webhook_secret_token")
+    @classmethod
+    def validate_webhook_secret_token(
+        cls,
+        value: SecretStr | None,
+    ) -> SecretStr | None:
+        if value is None:
+            return None
+        secret = value.get_secret_value()
+        if not WEBHOOK_SECRET_TOKEN_PATTERN.fullmatch(secret):
+            raise ValueError(
+                "TELEGRAM_WEBHOOK_SECRET_TOKEN must be 1-256 characters of "
+                "A-Z, a-z, 0-9, '_' or '-'"
+            )
+        return value
 
     @field_validator(
         "vertex_video_duration_seconds",
@@ -189,6 +246,21 @@ class Settings(BaseSettings):
             raise ValueError(
                 "VERTEX_LOCATION must be 'global' when "
                 "VERTEX_IMAGE_MODEL is 'gemini-3-pro-image-preview'"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_webhook_mode_settings(self) -> Settings:
+        if self.app_update_mode != "webhook":
+            return self
+        if self.telegram_webhook_url is None:
+            raise ValueError(
+                "TELEGRAM_WEBHOOK_URL is required when APP_UPDATE_MODE is 'webhook'"
+            )
+        if self.telegram_webhook_secret_token is None:
+            raise ValueError(
+                "TELEGRAM_WEBHOOK_SECRET_TOKEN is required when APP_UPDATE_MODE "
+                "is 'webhook'"
             )
         return self
 
