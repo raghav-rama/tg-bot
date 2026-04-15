@@ -16,10 +16,17 @@ class _FakeModels:
     def __init__(self, *, response=None, error: Exception | None = None) -> None:
         self.response = response
         self.error = error
-        self.calls: list[dict] = []
+        self.generate_images_calls: list[dict] = []
+        self.generate_content_calls: list[dict] = []
 
     def generate_images(self, **kwargs):
-        self.calls.append(kwargs)
+        self.generate_images_calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return self.response
+
+    def generate_content(self, **kwargs):
+        self.generate_content_calls.append(kwargs)
         if self.error is not None:
             raise self.error
         return self.response
@@ -95,7 +102,82 @@ async def test_generate_image_returns_first_image_bytes() -> None:
 
     assert result.image_bytes == b"vertex-image"
     assert result.raw_model == "imagen-4.0-fast-generate-001"
-    assert models.calls[0]["prompt"] == "A fox in a library"
+    assert models.generate_images_calls[0]["prompt"] == "A fox in a library"
+    assert models.generate_content_calls == []
+
+
+@pytest.mark.asyncio
+async def test_generate_image_routes_gemini_models_to_generate_content() -> None:
+    response = type(
+        "Response",
+        (),
+        {
+            "candidates": [
+                type(
+                    "Candidate",
+                    (),
+                    {
+                        "content": type(
+                            "Content",
+                            (),
+                            {
+                                "parts": [
+                                    type("Part", (), {"text": "Generated image"})(),
+                                    type(
+                                        "Part",
+                                        (),
+                                        {
+                                            "inline_data": type(
+                                                "InlineData",
+                                                (),
+                                                {
+                                                    "data": b"gemini-image",
+                                                    "mime_type": "image/png",
+                                                },
+                                            )()
+                                        },
+                                    )(),
+                                ]
+                            },
+                        )()
+                    },
+                )()
+            ]
+        },
+    )()
+    models = _FakeModels(response=response)
+    provider = VertexImageProvider(
+        project="test-project",
+        location="global",
+        default_model="imagen-4.0-fast-generate-001",
+        default_aspect_ratio="1:1",
+        default_output_mime_type="image/jpeg",
+        client=_FakeClient(models),
+    )
+
+    result = await provider.generate_image(
+        ImageGenerationRequest(
+            chat_id=1,
+            user_id=42,
+            prompt="A fox in a library",
+            model="gemini-3-pro-image-preview",
+            aspect_ratio="1:1",
+            output_mime_type="image/jpeg",
+        )
+    )
+
+    assert result.image_bytes == b"gemini-image"
+    assert result.mime_type == "image/png"
+    assert result.raw_model == "gemini-3-pro-image-preview"
+    assert models.generate_images_calls == []
+    assert models.generate_content_calls[0]["contents"] == "A fox in a library"
+    assert models.generate_content_calls[0]["config"] == {
+        "response_modalities": ["TEXT", "IMAGE"],
+        "image_config": {
+            "aspect_ratio": "1:1",
+            "output_mime_type": "image/jpeg",
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -145,6 +227,52 @@ async def test_generate_image_raises_on_empty_result() -> None:
                 user_id=42,
                 prompt="A fox in a library",
                 model="imagen-4.0-fast-generate-001",
+                aspect_ratio="1:1",
+                output_mime_type="image/jpeg",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_generate_image_raises_when_gemini_returns_no_image_part() -> None:
+    provider = VertexImageProvider(
+        project="test-project",
+        location="global",
+        default_model="imagen-4.0-fast-generate-001",
+        default_aspect_ratio="1:1",
+        default_output_mime_type="image/jpeg",
+        client=_FakeClient(
+            _FakeModels(
+                response=type(
+                    "Response",
+                    (),
+                    {
+                        "candidates": [
+                            type(
+                                "Candidate",
+                                (),
+                                {
+                                    "content": type(
+                                        "Content",
+                                        (),
+                                        {"parts": [type("Part", (), {"text": "Only text"})()]},
+                                    )()
+                                },
+                            )()
+                        ]
+                    },
+                )()
+            )
+        ),
+    )
+
+    with pytest.raises(ProviderUpstreamError):
+        await provider.generate_image(
+            ImageGenerationRequest(
+                chat_id=1,
+                user_id=42,
+                prompt="A fox in a library",
+                model="gemini-3-pro-image-preview",
                 aspect_ratio="1:1",
                 output_mime_type="image/jpeg",
             )

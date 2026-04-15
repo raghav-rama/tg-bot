@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.providers.vertex_image_models import requires_global_location
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are a concise assistant for a YouTube channel workflow. "
@@ -176,6 +178,19 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("video settings must be greater than zero")
         return value
+
+    @model_validator(mode="after")
+    def validate_vertex_image_model_location(self) -> Settings:
+        if (
+            self.vertex_image_generation_enabled
+            and requires_global_location(self.vertex_image_model)
+            and self.vertex_location != "global"
+        ):
+            raise ValueError(
+                "VERTEX_LOCATION must be 'global' when "
+                "VERTEX_IMAGE_MODEL is 'gemini-3-pro-image-preview'"
+            )
+        return self
 
     @property
     def allowed_user_ids(self) -> set[int]:

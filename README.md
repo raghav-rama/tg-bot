@@ -49,6 +49,7 @@ Current constraints:
 - raw generated image and video bytes are not persisted in SQLite
 - live Telegram and Vertex verification still depends on real credentials and manual runtime checks
 - generated video storage cleanup is still an open Phase 3 task
+- Gemini image models use a separate preview path from Imagen; `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`
 
 ## Architecture At A Glance
 
@@ -102,6 +103,9 @@ VERTEX_API_KEY=your-vertex-api-key
 # For ADC / project-based auth, use these instead or in addition.
 # VERTEX_PROJECT_ID=your-gcp-project-id
 # VERTEX_LOCATION=us-central1
+# For Gemini 3 Pro Image preview, set:
+# VERTEX_IMAGE_MODEL=gemini-3-pro-image-preview
+# VERTEX_LOCATION=global
 ```
 
 3. Start the app:
@@ -149,6 +153,12 @@ Vertex image settings:
 - `VERTEX_IMAGE_MODEL`
 - `VERTEX_IMAGE_ASPECT_RATIO`
 - `VERTEX_IMAGE_OUTPUT_MIME_TYPE`
+
+Image model notes:
+
+- Imagen remains the default `/image` model path and uses the dedicated Vertex `generate_images` API.
+- Gemini image models are supported through the Vertex `generate_content` API.
+- `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`.
 
 Vertex video settings:
 

@@ -48,6 +48,10 @@ from app.domain.models import (
 )
 from app.logging import log_kv
 from app.providers.base import AIProvider, ImageGenerator, VideoGenerator
+from app.providers.vertex_image_models import (
+    image_generation_api_method,
+    requires_global_location,
+)
 from app.storage.conversations import ConversationRepository
 from app.storage.generation_jobs import GenerationJobRepository
 from app.storage.generated_images import GeneratedImageRepository
@@ -434,6 +438,15 @@ class ChatService:
                     user_id=message.user_id,
                     provider="vertex",
                     model=self.settings.vertex_image_model,
+                    location=self.settings.vertex_location,
+                    api_method=image_generation_api_method(
+                        self.settings.vertex_image_model
+                    ),
+                    required_location=(
+                        "global"
+                        if requires_global_location(self.settings.vertex_image_model)
+                        else None
+                    ),
                 ),
                 exc_info=True,
             )

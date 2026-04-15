@@ -24,7 +24,7 @@ The current repo plan is active Phase 3 Vertex video generation.
 
 ## Current State
 
-As of `2026-04-14`, the repository is no longer docs-only. Phase 1, Phase 1.5, and Phase 2 are accepted as complete, and Phase 3 video-generation work is now in progress.
+As of `2026-04-15`, the repository is no longer docs-only. Phase 1, Phase 1.5, and Phase 2 are accepted as complete, and Phase 3 video-generation work is now in progress.
 
 - Phase 1 foundation code exists under `app/`.
 - Project metadata and dependency definitions exist in `pyproject.toml` and `uv.lock`.
@@ -33,6 +33,7 @@ As of `2026-04-14`, the repository is no longer docs-only. Phase 1, Phase 1.5, a
 - Phase 1.5 code exists for OpenAI streamed responses, Telegram draft delivery, Telegram-safe final-message formatting, and per-chat supersession handling.
 - Phase 2 code now exists for `/image <prompt>`, Vertex image generation through the Python `google-genai` SDK path, Telegram photo delivery, and SQLite persistence of generated-image metadata.
 - Phase 2 image generation now supports a Vertex API key for local testing and can still use ADC when needed.
+- The `/image` provider now supports both Imagen models through Vertex `generate_images` and Gemini image models through Vertex `generate_content`; `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`.
 - Phase 3 code now exists for `/video <prompt>`, SQLite-backed generation jobs, an in-process polling worker, Vertex video generation through the Python `google-genai` SDK path, and Telegram video delivery.
 - Video generation currently supports either inline provider-returned bytes or URI-backed output that can be fetched later when needed.
 - Telegram video delivery now uses a configurable request timeout and logs concrete delivery exceptions for easier debugging of slow or ambiguous uploads.

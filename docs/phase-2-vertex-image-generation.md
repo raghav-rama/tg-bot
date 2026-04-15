@@ -18,7 +18,7 @@ The Phase 2 design assumes these currently documented facts:
 - the Google Gen AI Python SDK supports Vertex AI client initialization with `genai.Client(vertexai=True, project=..., location=...)`
 - the current Vertex AI docs also support API-key authentication for testing, and Google recommends API keys for testing while recommending ADC for production
 - the Google Gen AI Python SDK exposes a dedicated `client.models.generate_images(...)` path for Imagen models
-- current Vertex AI docs note that Gemini image generation is preview and requires mixed `TEXT` plus `IMAGE` output, while Imagen has a dedicated image-generation API
+- current Vertex AI docs note that Gemini image generation uses `client.models.generate_content(...)` with mixed `TEXT` plus `IMAGE` output, while Imagen has a dedicated image-generation API
 
 ## Goal
 
@@ -44,7 +44,7 @@ Let an allowed user request a generated image and receive it in Telegram without
 
 ## Current Phase 2 Implementation Choice
 
-Phase 2 starts with Imagen on Vertex AI.
+Phase 2 defaults to Imagen on Vertex AI and also supports Gemini image models through a separate preview path.
 
 Reasons:
 
@@ -52,8 +52,9 @@ Reasons:
 - the first milestone needs one image per prompt, not conversational mixed-modality output
 - Telegram delivery only needs image bytes, not combined text plus image parts
 - current Vertex docs describe Gemini image generation as preview, which is a weaker default for the first production-oriented image milestone
+- `gemini-3-pro-image-preview` uses the `generate_content` path and requires the `global` Vertex location
 
-This does not rule out Gemini later. It only keeps the first Phase 2 slice smaller and more reliable.
+This keeps Imagen as the default while allowing explicit Gemini image-model configuration when needed.
 
 ## Architecture Delta From Phase 1.5
 
@@ -169,6 +170,12 @@ Authentication options:
 - for production-oriented deployments, ADC remains the safer default
 
 When both are present, the app may prefer the explicit API key path for image generation.
+
+Model routing notes:
+
+- Imagen models continue to use the dedicated `generate_images` path.
+- Gemini image models use `generate_content` and return mixed text plus image parts; the bot currently extracts the first returned image and ignores any Gemini text part.
+- `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`.
 
 ## Exit Criteria
 

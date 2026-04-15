@@ -147,9 +147,9 @@ Let the bot generate images and send them back to Telegram.
 ### Design Notes
 
 - Keep chat on OpenAI while image generation lives on Vertex AI.
-- The current implementation starts with Imagen on Vertex AI through the dedicated `generate_images` SDK path.
+- The current implementation keeps Imagen as the default path through the dedicated `generate_images` SDK path and also supports Gemini image models through `generate_content`.
 - The implementation now supports a Vertex API key for testing and can still fall back to ADC when that key is not configured.
-- This is an intentional Phase 2 implementation choice: current official Vertex docs expose a straightforward Python image-generation API for Imagen, while Gemini image generation on Vertex AI is still documented as preview and requires mixed `TEXT` plus `IMAGE` output.
+- This remains the default Phase 2 implementation choice: current official Vertex docs expose a straightforward Python image-generation API for Imagen, while Gemini image generation on Vertex AI uses mixed `TEXT` plus `IMAGE` output and remains a preview-oriented path.
 - Telegram handler code should continue to normalize inbound updates and deliver outbound media only. Generation routing stays in the domain and provider layers.
 
 ### New Decisions Needed
@@ -157,7 +157,7 @@ Let the bot generate images and send them back to Telegram.
 - whether generated images should be reusable across chats by storing and reusing Telegram `file_id`
 - whether successful `/image` generations should also write a richer assistant summary row into chat history
 - whether Phase 2 should later widen from simple prompt-to-image into image editing or variation flows
-- whether Gemini image generation should be evaluated later once its API surface stabilizes for production use
+- whether Gemini image generation should move from optional preview support into the default `/image` configuration later
 
 ### Exit Criteria
 

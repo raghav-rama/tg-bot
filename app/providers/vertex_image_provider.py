@@ -5,6 +5,7 @@ from typing import Any
 
 from app.domain.errors import ProviderTimeoutError, ProviderUpstreamError
 from app.domain.models import GeneratedImageResult, ImageGenerationRequest
+from app.providers.vertex_image_models import is_gemini_image_model
 
 
 class VertexImageProvider:
@@ -77,6 +78,7 @@ class VertexImageProvider:
         self,
         request: ImageGenerationRequest,
     ) -> GeneratedImageResult:
+        resolved_model = request.model or self._default_model
         try:
             response = await asyncio.to_thread(self._generate_image_sync, request)
         except Exception as exc:
@@ -87,6 +89,26 @@ class VertexImageProvider:
                 raise ProviderUpstreamError("Vertex image generation failed") from exc
             raise
 
+        if is_gemini_image_model(resolved_model):
+            return self._parse_gemini_generated_image(
+                response=response,
+                request=request,
+                resolved_model=resolved_model,
+            )
+
+        return self._parse_imagen_generated_image(
+            response=response,
+            request=request,
+            resolved_model=resolved_model,
+        )
+
+    def _parse_imagen_generated_image(
+        self,
+        *,
+        response: Any,
+        request: ImageGenerationRequest,
+        resolved_model: str,
+    ) -> GeneratedImageResult:
         generated_images = getattr(response, "generated_images", None) or []
         if not generated_images:
             raise ProviderUpstreamError("Vertex image generation returned no images")
@@ -101,11 +123,55 @@ class VertexImageProvider:
             image_bytes=image_bytes,
             mime_type=request.output_mime_type,
             provider="vertex",
-            raw_model=request.model,
+            raw_model=resolved_model,
             prompt=request.prompt,
         )
 
+    def _parse_gemini_generated_image(
+        self,
+        *,
+        response: Any,
+        request: ImageGenerationRequest,
+        resolved_model: str,
+    ) -> GeneratedImageResult:
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            raise ProviderUpstreamError("Vertex image generation returned no candidates")
+
+        first_candidate = candidates[0]
+        content = getattr(first_candidate, "content", None)
+        parts = getattr(content, "parts", None) or []
+        for part in parts:
+            inline_data = getattr(part, "inline_data", None)
+            image_bytes = getattr(inline_data, "data", None)
+            if not image_bytes:
+                continue
+            return GeneratedImageResult(
+                image_bytes=image_bytes,
+                mime_type=(
+                    getattr(inline_data, "mime_type", None)
+                    or request.output_mime_type
+                    or self._default_output_mime_type
+                ),
+                provider="vertex",
+                raw_model=resolved_model,
+                prompt=request.prompt,
+            )
+
+        raise ProviderUpstreamError("Vertex image generation returned no image bytes")
+
     def _generate_image_sync(self, request: ImageGenerationRequest) -> Any:
+        resolved_model = request.model or self._default_model
+        if is_gemini_image_model(resolved_model):
+            return self._generate_gemini_image_sync(request, resolved_model)
+
+        return self._generate_imagen_image_sync(request, resolved_model)
+
+    def _generate_imagen_image_sync(
+        self,
+        request: ImageGenerationRequest,
+        resolved_model: str,
+    ) -> Any:
         config = {
             "number_of_images": 1,
             "output_mime_type": request.output_mime_type or self._default_output_mime_type,
@@ -115,7 +181,36 @@ class VertexImageProvider:
             config = self._types_module.GenerateImagesConfig(**config)
 
         return self._client.models.generate_images(
-            model=request.model or self._default_model,
+            model=resolved_model,
             prompt=request.prompt,
+            config=config,
+        )
+
+    def _generate_gemini_image_sync(
+        self,
+        request: ImageGenerationRequest,
+        resolved_model: str,
+    ) -> Any:
+        image_config = {
+            "aspect_ratio": request.aspect_ratio or self._default_aspect_ratio,
+            "output_mime_type": request.output_mime_type or self._default_output_mime_type,
+        }
+        config = {
+            "response_modalities": ["TEXT", "IMAGE"],
+            "image_config": image_config,
+        }
+        if self._types_module is not None:
+            image_config = self._types_module.ImageConfig(**image_config)
+            config = self._types_module.GenerateContentConfig(
+                response_modalities=[
+                    self._types_module.Modality.TEXT,
+                    self._types_module.Modality.IMAGE,
+                ],
+                image_config=image_config,
+            )
+
+        return self._client.models.generate_content(
+            model=resolved_model,
+            contents=request.prompt,
             config=config,
         )
