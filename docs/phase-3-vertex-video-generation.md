@@ -8,6 +8,8 @@ Phase 3 adds explicit video generation to the existing private bot. A user can s
 
 This is an asynchronous product-scope phase. It does not reuse the Phase 1 or Phase 2 synchronous request shape because Veo generation is operation-based and can outlive the original Telegram update handler.
 
+Phase 3 is now accepted as complete for repo sequencing.
+
 ## Source-Grounded API Facts
 
 The Phase 3 design assumes these currently documented facts:
@@ -171,6 +173,14 @@ Initial implementation notes:
 - `VERTEX_VIDEO_OUTPUT_GCS_URI` is optional; when omitted, the provider prefers inline video bytes returned by Vertex
 - when Vertex only returns a `gs://` asset URI, the provider can fetch the result later from Cloud Storage
 - Telegram video uploads should use a request timeout above the aiogram default `60s` when larger generated assets are expected, because Telegram may finish delivery after the client-side timeout window closes
+
+## Storage Lifecycle Rule
+
+Phase 3 treats generated video assets as delivery-time artifacts, not durable application-owned blobs.
+
+- inline video bytes are held in memory only for the active polling and delivery path, then discarded
+- SQLite persists metadata plus the optional output URI, not raw video bytes
+- if Vertex returns or writes a `gs://` asset URI, long-term retention and cleanup are expected to be managed by the configured bucket lifecycle policy outside this app
 
 ## Exit Criteria
 

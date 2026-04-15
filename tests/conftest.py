@@ -152,6 +152,8 @@ def build_settings(database_path: Path, **overrides) -> Settings:
         "OPENAI_API_KEY": "test-key",
         "TELEGRAM_ALLOWED_USER_IDS": "42",
         "APP_UPDATE_MODE": "webhook",
+        "TELEGRAM_WEBHOOK_URL": "https://bot.example.com/telegram/webhook",
+        "TELEGRAM_WEBHOOK_SECRET_TOKEN": "test-webhook-secret",
         "SQLITE_PATH": str(database_path),
         "OPENAI_MODEL": "gpt-4.1-mini",
         "VERTEX_PROJECT_ID": "test-project",
