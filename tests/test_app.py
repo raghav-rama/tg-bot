@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from app.providers.openai_provider import OpenAIProvider
+from app.storage.db import Database
 from app.telegram.polling import TelegramRuntime
 
 
@@ -77,3 +79,46 @@ def test_readyz_reports_webhook_startup_failure(monkeypatch, tmp_path) -> None:
     assert ready_response.status_code == 503
     assert ready_response.json()["ok"] is False
     assert "webhook setup failed" in ready_response.json()["detail"]
+
+
+def test_webhook_startup_failure_closes_initialized_resources(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    closed_resources: list[str] = []
+
+    async def fake_configure_webhook(
+        self,
+        *,
+        url: str,
+        secret_token: str,
+        drop_pending_updates: bool = False,
+    ) -> None:
+        raise RuntimeError("webhook setup failed")
+
+    original_runtime_close = TelegramRuntime.close
+    original_provider_close = OpenAIProvider.close
+    original_database_close = Database.close
+
+    async def tracked_runtime_close(self) -> None:
+        closed_resources.append("telegram_runtime")
+        await original_runtime_close(self)
+
+    async def tracked_provider_close(self) -> None:
+        closed_resources.append("provider")
+        await original_provider_close(self)
+
+    async def tracked_database_close(self) -> None:
+        closed_resources.append("database")
+        await original_database_close(self)
+
+    monkeypatch.setattr(TelegramRuntime, "configure_webhook", fake_configure_webhook)
+    monkeypatch.setattr(TelegramRuntime, "close", tracked_runtime_close)
+    monkeypatch.setattr(OpenAIProvider, "close", tracked_provider_close)
+    monkeypatch.setattr(Database, "close", tracked_database_close)
+
+    with TestClient(create_app(_build_webhook_settings(tmp_path))) as client:
+        ready_response = client.get("/readyz")
+
+    assert ready_response.status_code == 503
+    assert closed_resources == ["telegram_runtime", "provider", "database"]

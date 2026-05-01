@@ -5,4 +5,5 @@ data/
 *.egg-info/
 .envrc
 service-account.json
+.DS_Store
 
