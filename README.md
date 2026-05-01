@@ -4,12 +4,12 @@ Private Telegram bot built with FastAPI, SQLite, OpenAI chat, and Vertex AI imag
 
 ## Status
 
-The repository is currently in `Phase 3 - Vertex Video Generation`.
+The repository has completed `Phase 3 - Vertex Video Generation` and is now aligned to `Phase 4 - Hardening And Expansion`.
 
 Implemented today:
 
 - private, allowlisted Telegram bot
-- polling-first runtime with a webhook path kept available
+- polling-first runtime plus a Phase 4 webhook mode that self-registers with Telegram
 - SQLite-backed conversation memory and reset semantics
 - text chat and single-photo understanding through OpenAI
 - Telegram draft streaming for long-running text replies
@@ -46,16 +46,17 @@ Current constraints:
 - the bot stays private through `TELEGRAM_ALLOWED_USER_IDS`
 - draft streaming targets private text chats first
 - image-understanding requests use the final-only reply path by default
+- webhook mode requires a public HTTPS URL and validates `X-Telegram-Bot-Api-Secret-Token`
 - raw generated image and video bytes are not persisted in SQLite
 - live Telegram and Vertex verification still depends on real credentials and manual runtime checks
-- generated video storage cleanup is still an open Phase 3 task
+- generated video bytes remain transient in memory only, and URI-backed assets should rely on external bucket lifecycle cleanup
 - Gemini image models use a separate preview path from Imagen; `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`
 
 ## Architecture At A Glance
 
 The runtime is split so Telegram transport stays separate from domain and provider logic.
 
-- `app/api/`: `healthz`, `readyz`, and reserved webhook ingestion
+- `app/api/`: `healthz`, `readyz`, and webhook ingestion
 - `app/telegram/`: polling runtime, handlers, normalization, formatting, media delivery, and drafts
 - `app/domain/`: commands, models, interfaces, and orchestration in `ChatService`
 - `app/providers/`: OpenAI chat plus Vertex image and video adapters
@@ -89,6 +90,10 @@ TELEGRAM_ALLOWED_USER_IDS=123456789
 APP_UPDATE_MODE=polling
 APP_LOG_LEVEL=INFO
 SQLITE_PATH=./data/bot.db
+# Required when APP_UPDATE_MODE=webhook
+# TELEGRAM_WEBHOOK_URL=https://bot.example.com/telegram/webhook
+# TELEGRAM_WEBHOOK_SECRET_TOKEN=your-webhook-secret
+# TELEGRAM_WEBHOOK_DROP_PENDING_UPDATES=false
 
 # Optional OpenAI overrides
 OPENAI_MODEL=gpt-4.1-mini
@@ -124,6 +129,9 @@ Core settings:
 - `OPENAI_API_KEY`: required
 - `TELEGRAM_ALLOWED_USER_IDS`: required comma-separated Telegram user IDs
 - `APP_UPDATE_MODE`: `polling` or `webhook`
+- `TELEGRAM_WEBHOOK_URL`: required HTTPS URL when webhook mode is enabled
+- `TELEGRAM_WEBHOOK_SECRET_TOKEN`: required when webhook mode is enabled
+- `TELEGRAM_WEBHOOK_DROP_PENDING_UPDATES`: default `false`
 - `APP_LOG_LEVEL`: default `INFO`
 - `SQLITE_PATH`: default `./data/bot.db`
 
@@ -183,6 +191,9 @@ Polling mode:
 Webhook mode:
 
 - set `APP_UPDATE_MODE=webhook`
+- set `TELEGRAM_WEBHOOK_URL` to the public HTTPS endpoint that Telegram can reach
+- set `TELEGRAM_WEBHOOK_SECRET_TOKEN`; Telegram sends it back in `X-Telegram-Bot-Api-Secret-Token`
+- startup registers the webhook with Telegram before readiness turns healthy
 - POST updates to `/telegram/webhook`
 - keeps the same normalized processing path as polling
 
@@ -249,6 +260,5 @@ uv.lock
 
 ## Notes For Future Work
 
-- storage cleanup policy for generated video assets is still pending
 - distributed workers and external job queues are out of scope today
-- webhook-first deployment remains a later hardening step
+- richer observability, quotas, and stronger in-app retention controls remain Phase 4 work

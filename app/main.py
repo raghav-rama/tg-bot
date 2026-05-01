@@ -118,6 +118,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             if loaded_settings.app_update_mode == "polling":
                 await telegram_runtime.start()
+            else:
+                await telegram_runtime.configure_webhook(
+                    url=loaded_settings.telegram_webhook_url or "",
+                    secret_token=(
+                        loaded_settings.telegram_webhook_secret_token.get_secret_value()
+                        if loaded_settings.telegram_webhook_secret_token is not None
+                        else ""
+                    ),
+                    drop_pending_updates=(
+                        loaded_settings.telegram_webhook_drop_pending_updates
+                    ),
+                )
             video_job_worker = None
             if video_generator is not None:
                 video_job_worker = VideoJobWorker(
@@ -155,6 +167,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 log_kv(
                     "application_started",
                     update_mode=loaded_settings.app_update_mode,
+                    webhook_url=(
+                        telegram_runtime.webhook_url
+                        if loaded_settings.app_update_mode == "webhook"
+                        else None
+                    ),
                     model=loaded_settings.openai_model,
                     video_generation_enabled=loaded_settings.vertex_video_generation_enabled,
                     video_model=(

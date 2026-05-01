@@ -7,15 +7,15 @@ This document separates the current repo state from the planned delivery phases.
 - `architecture.md`, `flows.md`, and `implementation-plan.md` define the Phase 1 build only.
 - `phase-1-5-draft-streaming.md` defines the Phase 1.5 draft-streaming work only.
 - `phase-2-vertex-image-generation.md` defines the completed Phase 2 image-generation work only.
-- `phase-3-vertex-video-generation.md` defines the active Phase 3 video-generation work only.
-- This roadmap tracks the broader direction, especially the later Vertex video-generation work.
+- `phase-3-vertex-video-generation.md` defines the completed Phase 3 video-generation work only.
+- This roadmap tracks the broader direction, especially the later hardening and expansion work.
 
 ## Current Phase
 
-- Active phase: `Phase 3 - Vertex Video Generation`
+- Active phase: `Phase 4 - Hardening And Expansion`
 - Status: `in_progress`
-- Last updated: `2026-04-12`
-- Exit criteria source: `Phase 3 - Vertex Video Generation`
+- Last updated: `2026-04-15`
+- Previous phase accepted: `Phase 3 - Vertex Video Generation`
 - Evidence:
   - Phase 1 foundation work is accepted as complete for repo sequencing
   - Phase 1.5 draft streaming is accepted as complete and no longer blocks the next milestone
@@ -23,14 +23,14 @@ This document separates the current repo state from the planned delivery phases.
   - an explicit `/video` command path now exists alongside the existing OpenAI chat and `/image` flows
   - video generation now uses persisted `generation_jobs` rows plus a background polling worker instead of blocking the original request path
   - completed video jobs now deliver through Telegram `sendVideo`
-  - live Vertex and Telegram runtime verification for the new `/video` flow is still pending
+  - video asset retention rules are now explicit: inline bytes stay transient in memory, while URI-backed outputs rely on external bucket lifecycle policy
 
 ## Current State
 
-As of `2026-04-12`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, and an in-progress Phase 3 video-generation slice.
+As of `2026-04-15`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, and the completed Phase 3 video-generation slice.
 
 - Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, OpenAI chat, and Vertex image plus video generation.
-- A polling-first runtime exists, while the webhook route remains reserved behind the same shared processing path.
+- A polling-first runtime exists, and webhook mode now reuses the same shared processing path when enabled.
 - SQLite-backed conversation memory, command handling, allowlist checks, and text plus single-image inbound normalization are implemented.
 - OpenAI response streaming, in-memory Telegram draft sessions, and per-chat supersession handling are implemented and accepted as complete for Phase 1.5.
 - `/image <prompt>` now generates one image through Vertex AI and sends it back through Telegram `sendPhoto`.
@@ -39,7 +39,9 @@ As of `2026-04-12`, this repository contains the completed Phase 1 foundation, t
 - An in-process polling worker now checks pending video jobs and delivers completed assets through Telegram `sendVideo`.
 - Video job persistence stores operation state, output URIs, failure reasons, and Telegram delivery metadata without persisting raw video bytes in SQLite.
 - Tests exist under `tests/` for health and readiness behavior, normalization, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, supersession, Telegram formatting, image generation, video job submission, worker completion, worker failure handling, and the new Vertex video provider.
-- Real Vertex and Telegram verification still depends on configured credentials and a manual runtime check, and storage cleanup policy remains a later Phase 3 task.
+- Real Vertex and Telegram verification still depends on configured credentials and a manual runtime check.
+- Inline generated video bytes remain transient in memory only, while URI-backed assets are expected to live in a bucket with lifecycle cleanup managed outside the app.
+- Phase 4 has started with a real webhook deployment path: webhook mode now registers the Telegram webhook on startup, validates the `X-Telegram-Bot-Api-Secret-Token` header on inbound requests, and reports webhook setup state through readiness.
 
 ## Recommended Sequencing
 
@@ -170,7 +172,7 @@ Phase 2 is done when:
 
 ## Phase 3 - Vertex Video Generation
 
-Status: `in_progress`
+Status: `complete`
 
 Dedicated planning doc: [phase-3-vertex-video-generation.md](phase-3-vertex-video-generation.md)
 
@@ -186,7 +188,7 @@ Video generation should not be forced into the same synchronous shape as Phase 1
 - Telegram video delivery has tighter delivery and upload constraints than plain text replies.
 - Generated video files will need stronger lifecycle management than text or transient image inputs.
 
-### Proposed Scope
+### Completed Scope
 
 - introduce a generation jobs table with statuses such as `queued`, `running`, `completed`, `failed`
 - add a worker or polling loop for long-running Vertex operations
@@ -195,7 +197,7 @@ Video generation should not be forced into the same synchronous shape as Phase 1
 - store generated video assets outside SQLite and deliver them with Telegram `sendVideo`
 - send follow-up status or completion messages instead of blocking the original request path
 
-### New Decisions Needed
+### Follow-Up Decisions
 
 - local temporary storage vs GCS for generated video assets
 - retry policy for failed or slow Veo operations
@@ -213,7 +215,7 @@ Phase 3 is done when:
 
 ## Phase 4 - Hardening And Expansion
 
-Status: `not_started`
+Status: `in_progress`
 
 After the foundation and media-generation phases work, the next layer is operational hardening.
 
@@ -223,6 +225,13 @@ After the foundation and media-generation phases work, the next layer is operati
 - moderation and safety controls for generated media
 - stronger asset retention and cleanup policies
 - optional provider strategy review if OpenAI chat plus Vertex media becomes hard to operate
+- /image and /video command accept a reference image for generating content (gemini models eg: gemini-3-pro-image-preview)
+
+Current Phase 4 progress:
+
+- webhook mode now self-registers against Telegram with `setWebhook`
+- webhook mode now requires and validates a Telegram secret token header
+- readiness now treats missing webhook setup as not ready
 
 ## Decisions To Lock Early
 

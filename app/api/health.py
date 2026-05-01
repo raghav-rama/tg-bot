@@ -30,10 +30,18 @@ async def readyz(request: Request) -> JSONResponse:
     ):
         ready = False
         detail = f"telegram polling failed: {type(container.telegram_runtime.last_error).__name__}"
+    elif (
+        container.settings.app_update_mode == "webhook"
+        and (
+            container.telegram_runtime is None
+            or not container.telegram_runtime.webhook_configured
+        )
+    ):
+        ready = False
+        detail = "telegram webhook is not configured"
 
     status_code = 200 if ready else 503
     payload: dict[str, object] = {"ok": ready}
     if detail is not None:
         payload["detail"] = detail
     return JSONResponse(status_code=status_code, content=payload)
-

@@ -16,6 +16,9 @@ _REPO_ENV_KEYS = (
     "OPENAI_MAX_OUTPUT_TOKENS",
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_ALLOWED_USER_IDS",
+    "TELEGRAM_WEBHOOK_DROP_PENDING_UPDATES",
+    "TELEGRAM_WEBHOOK_SECRET_TOKEN",
+    "TELEGRAM_WEBHOOK_URL",
     "TELEGRAM_VIDEO_REQUEST_TIMEOUT_SECONDS",
     "VERTEX_API_KEY",
     "VERTEX_IMAGE_ASPECT_RATIO",
@@ -44,12 +47,15 @@ def test_draft_streaming_defaults_are_conservative(tmp_path, monkeypatch) -> Non
         OPENAI_API_KEY="test-key",
         TELEGRAM_ALLOWED_USER_IDS="42",
         APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
         SQLITE_PATH=str(tmp_path / "bot.db"),
     )
 
     assert settings.bot_draft_start_delay_ms == 750
     assert settings.bot_draft_update_interval_ms == 1200
     assert settings.bot_draft_min_chars_delta == 80
+    assert settings.telegram_webhook_drop_pending_updates is False
     assert settings.vertex_project_id is None
     assert settings.vertex_location == "us-central1"
     assert settings.vertex_image_model == "imagen-4.0-fast-generate-001"
@@ -70,6 +76,8 @@ def test_vertex_api_key_also_enables_image_generation(tmp_path, monkeypatch) -> 
         OPENAI_API_KEY="test-key",
         TELEGRAM_ALLOWED_USER_IDS="42",
         APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
         SQLITE_PATH=str(tmp_path / "bot.db"),
         VERTEX_API_KEY="vertex-test-key",
     )
@@ -94,6 +102,8 @@ def test_gemini_3_pro_image_requires_global_location_when_enabled(
             OPENAI_API_KEY="test-key",
             TELEGRAM_ALLOWED_USER_IDS="42",
             APP_UPDATE_MODE="webhook",
+            TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+            TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
             SQLITE_PATH=str(tmp_path / "bot.db"),
             VERTEX_API_KEY="vertex-test-key",
             VERTEX_IMAGE_MODEL="gemini-3-pro-image-preview",
@@ -109,6 +119,8 @@ def test_gemini_3_pro_image_accepts_global_location(tmp_path, monkeypatch) -> No
         OPENAI_API_KEY="test-key",
         TELEGRAM_ALLOWED_USER_IDS="42",
         APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
         SQLITE_PATH=str(tmp_path / "bot.db"),
         VERTEX_API_KEY="vertex-test-key",
         VERTEX_IMAGE_MODEL="gemini-3-pro-image-preview",
@@ -117,3 +129,76 @@ def test_gemini_3_pro_image_accepts_global_location(tmp_path, monkeypatch) -> No
 
     assert settings.vertex_image_model == "gemini-3-pro-image-preview"
     assert settings.vertex_location == "global"
+
+
+def test_webhook_mode_requires_public_url(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    with pytest.raises(
+        ValidationError,
+        match="TELEGRAM_WEBHOOK_URL is required when APP_UPDATE_MODE is 'webhook'",
+    ):
+        Settings(
+            _env_file=None,
+            TELEGRAM_BOT_TOKEN="test-token",
+            OPENAI_API_KEY="test-key",
+            TELEGRAM_ALLOWED_USER_IDS="42",
+            APP_UPDATE_MODE="webhook",
+            TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+            SQLITE_PATH=str(tmp_path / "bot.db"),
+        )
+
+
+def test_webhook_mode_requires_secret_token(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    with pytest.raises(
+        ValidationError,
+        match="TELEGRAM_WEBHOOK_SECRET_TOKEN is required when APP_UPDATE_MODE is 'webhook'",
+    ):
+        Settings(
+            _env_file=None,
+            TELEGRAM_BOT_TOKEN="test-token",
+            OPENAI_API_KEY="test-key",
+            TELEGRAM_ALLOWED_USER_IDS="42",
+            APP_UPDATE_MODE="webhook",
+            TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+            SQLITE_PATH=str(tmp_path / "bot.db"),
+        )
+
+
+def test_webhook_url_must_be_https(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    with pytest.raises(
+        ValidationError,
+        match="TELEGRAM_WEBHOOK_URL must be a valid HTTPS URL",
+    ):
+        Settings(
+            _env_file=None,
+            TELEGRAM_BOT_TOKEN="test-token",
+            OPENAI_API_KEY="test-key",
+            TELEGRAM_ALLOWED_USER_IDS="42",
+            APP_UPDATE_MODE="webhook",
+            TELEGRAM_WEBHOOK_URL="http://bot.example.com/telegram/webhook",
+            TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+            SQLITE_PATH=str(tmp_path / "bot.db"),
+        )
+
+
+def test_webhook_secret_token_is_restricted_to_telegram_charset(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _clear_repo_env(monkeypatch)
+    with pytest.raises(
+        ValidationError,
+        match="TELEGRAM_WEBHOOK_SECRET_TOKEN must be 1-256 characters",
+    ):
+        Settings(
+            _env_file=None,
+            TELEGRAM_BOT_TOKEN="test-token",
+            OPENAI_API_KEY="test-key",
+            TELEGRAM_ALLOWED_USER_IDS="42",
+            APP_UPDATE_MODE="webhook",
+            TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+            TELEGRAM_WEBHOOK_SECRET_TOKEN="bad secret!",
+            SQLITE_PATH=str(tmp_path / "bot.db"),
+        )
