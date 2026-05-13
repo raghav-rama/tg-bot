@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+
+from aiogram import Dispatcher
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -22,6 +25,46 @@ def test_healthz_is_live_when_settings_are_missing(monkeypatch) -> None:
     assert health_response.json() == {"ok": True}
     assert ready_response.status_code == 503
     assert ready_response.json()["ok"] is False
+
+
+async def test_polling_runtime_leaves_process_signals_to_uvicorn(monkeypatch) -> None:
+    start_polling_kwargs: list[dict[str, object]] = []
+    polling_started = asyncio.Event()
+
+    class StubProcessor:
+        async def process_message(self, **_kwargs) -> None:
+            return None
+
+    async def fake_delete_webhook(
+        self,
+        *,
+        drop_pending_updates: bool = False,
+    ) -> None:
+        return None
+
+    async def fake_start_polling(self, bot, **kwargs) -> None:
+        start_polling_kwargs.append(kwargs)
+        polling_started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(TelegramRuntime, "delete_webhook", fake_delete_webhook)
+    monkeypatch.setattr(Dispatcher, "start_polling", fake_start_polling)
+
+    runtime = TelegramRuntime(
+        token="123456:TESTPollingTokenValueForAppTests1234567890",
+        processor=StubProcessor(),
+    )
+
+    await runtime.start()
+    await polling_started.wait()
+    await runtime.close()
+
+    assert start_polling_kwargs == [
+        {
+            "handle_signals": False,
+            "close_bot_session": False,
+        }
+    ]
 
 
 def _build_webhook_settings(tmp_path) -> Settings:
