@@ -8,6 +8,7 @@ This document separates the current repo state from the planned delivery phases.
 - `phase-1-5-draft-streaming.md` defines the Phase 1.5 draft-streaming work only.
 - `phase-2-vertex-image-generation.md` defines the completed Phase 2 image-generation work only.
 - `phase-3-vertex-video-generation.md` defines the completed Phase 3 video-generation work only.
+- Phase 5 ElevenLabs Hindi text-to-speech is tracked in this roadmap until it has a dedicated planning doc.
 - This roadmap tracks the broader direction, especially the later hardening and expansion work.
 
 ## Current Phase
@@ -51,6 +52,8 @@ Build this in order:
 2. Add partial reply streaming with Telegram drafts next.
 3. Add generated image output after draft streaming works.
 4. Add generated video output only after image generation works.
+5. Harden the deployed bot before adding text-to-speech output.
+6. Add Hindi text-to-speech as a dedicated `/tts` command after Phase 4.
 
 This ordering keeps the first milestone small, then improves reply UX before introducing richer media.
 
@@ -233,6 +236,52 @@ Current Phase 4 progress:
 - webhook mode now requires and validates a Telegram secret token header
 - readiness now treats missing webhook setup as not ready
 
+## Phase 5 - ElevenLabs Hindi Text To Speech
+
+Status: `planned`
+
+### Goal
+
+Let an allowed user send Hindi text through `/tts <text>` and receive generated speech back in Telegram without changing the normal OpenAI chat, `/image`, or `/video` paths.
+
+### Planned Scope
+
+- add an explicit `/tts <Hindi text>` command flow
+- generate speech through the ElevenLabs text-to-speech API
+- default to the ElevenLabs voice ID `vIdhHAZdn1bGjKe1dFw8`
+- start with Hindi text only
+- deliver the generated speech through Telegram `sendVoice`
+- keep generated audio bytes transient and out of SQLite
+- persist only command text and lightweight delivery/provider metadata if persistence is needed
+
+### Design Notes
+
+- `/tts` should be a synchronous command path first, similar to `/image`, because short text-to-speech requests should not require the queued `/video` job model.
+- Keep OpenAI chat, Vertex image/video generation, and ElevenLabs speech generation as separate provider interfaces.
+- Prefer Telegram voice-message delivery for the first milestone. If ElevenLabs output is MP3, current Telegram and aiogram behavior still supports sending it as a voice message; if an OGG/Opus output is selected later, verify the container and codec against Telegram before making it the default.
+- Use `eleven_multilingual_v2` as the initial quality-first model for Hindi unless latency or cost requires a switch to a faster model.
+- Pass a Hindi language hint such as `language_code="hi"` when supported by the selected SDK/API path.
+- Keep the first input contract simple: the text after `/tts` is the speech text. Do not mix `/tts` with chat-history rewriting, prompt expansion, or translation in the first milestone.
+
+### Decisions Needed
+
+- whether to reject non-Hindi or non-Devanagari input, or to trust the user and only document Hindi as supported
+- whether to store a dedicated generated-audio metadata table or only append command/message rows
+- whether to expose model and output-format configuration beyond environment variables
+- whether repeated identical TTS outputs should reuse Telegram `file_id`
+- maximum accepted text length for the first release
+
+### Exit Criteria
+
+Phase 5 is done when:
+
+- an allowed user can send `/tts <Hindi text>` and receive a playable Telegram voice message
+- `/tts` with missing text returns a clear usage message
+- ElevenLabs failures return a clear user-safe retry message
+- generated audio bytes are not persisted in SQLite
+- `/start`, `/help`, and `/status` accurately report the new command and whether TTS is configured
+- the existing OpenAI chat, `/image`, `/video`, polling, and webhook paths still work unchanged
+
 ## Decisions To Lock Early
 
 These choices should be made before coding gets too far:
@@ -242,6 +291,7 @@ These choices should be made before coding gets too far:
 3. Image generation comes before video generation.
 4. Video generation uses an asynchronous job model from the start.
 5. Telegram-specific code stays separate from provider and asset-management code.
+6. Text-to-speech generation stays separate from OpenAI chat and Vertex media providers.
 
 ## Planning References
 
@@ -250,8 +300,11 @@ These choices should be made before coding gets too far:
 - Telegram Bot API `sendMessageDraft`: https://core.telegram.org/bots/api#sendmessagedraft
 - Telegram Bot API `sendPhoto`: https://core.telegram.org/bots/api#sendphoto
 - Telegram Bot API `sendVideo`: https://core.telegram.org/bots/api#sendvideo
+- Telegram Bot API `sendVoice`: https://core.telegram.org/bots/api#sendvoice
 - Vertex AI quickstart: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start
 - Vertex AI API keys: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/api-keys
 - Vertex AI image generation overview: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/image/overview
 - Vertex AI video generation overview: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/video/generate-videos-from-text
 - Google Gen AI SDK overview: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/sdks/overview
+- ElevenLabs text-to-speech API: https://elevenlabs.io/docs/api-reference/text-to-speech/convert
+- ElevenLabs text-to-speech capabilities: https://elevenlabs.io/docs/overview/capabilities/text-to-speech
