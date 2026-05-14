@@ -13,6 +13,7 @@ from app.domain.commands import (
     EMPTY_TEXT_TEXT,
     GENERIC_FAILURE_TEXT,
     IMAGE_GENERATION_NOT_CONFIGURED_TEXT,
+    IMAGE_REFERENCE_REQUIRES_GEMINI_TEXT,
     IMAGE_GENERATION_RETRY_TEXT,
     IMAGE_PROMPT_REQUIRED_TEXT,
     PROVIDER_RETRY_TEXT,
@@ -55,6 +56,7 @@ from app.observability import (
 from app.providers.base import AIProvider, ImageGenerator, VideoGenerator
 from app.providers.vertex_image_models import (
     image_generation_api_method,
+    is_gemini_image_model,
     requires_global_location,
 )
 from app.storage.conversations import ConversationRepository
@@ -424,6 +426,16 @@ class ChatService:
             await self.conversations.touch(conversation.id)
             return ServiceReply(text=IMAGE_GENERATION_NOT_CONFIGURED_TEXT)
 
+        if message.image is not None and not is_gemini_image_model(
+            self.settings.vertex_image_model
+        ):
+            await self._persist_command_reply(
+                conversation,
+                IMAGE_REFERENCE_REQUIRES_GEMINI_TEXT,
+            )
+            await self.conversations.touch(conversation.id)
+            return ServiceReply(text=IMAGE_REFERENCE_REQUIRES_GEMINI_TEXT)
+
         try:
             generated_image = await self.image_generator.generate_image(
                 ImageGenerationRequest(
@@ -433,6 +445,7 @@ class ChatService:
                     model=self.settings.vertex_image_model,
                     aspect_ratio=self.settings.vertex_image_aspect_ratio,
                     output_mime_type=self.settings.vertex_image_output_mime_type,
+                    reference_image=message.image,
                 )
             )
         except (ProviderTimeoutError, ProviderUpstreamError):
@@ -539,6 +552,7 @@ class ChatService:
                 aspect_ratio=self.settings.vertex_video_aspect_ratio,
                 duration_seconds=self.settings.vertex_video_duration_seconds,
                 output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
+                reference_image=message.image,
             )
         )
         self.logger.info(
@@ -588,7 +602,7 @@ class ChatService:
             telegram_message_id=message.telegram_message_id,
             message_type="command",
             text=message.text or message.command,
-            image=None,
+            image=message.image,
             created_at=message.sent_at,
         )
 

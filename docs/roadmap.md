@@ -26,6 +26,7 @@ This document separates the current repo state from the planned delivery phases.
   - completed video jobs now deliver through Telegram `sendVideo`
   - video asset retention rules are now explicit: inline bytes stay transient in memory, while URI-backed outputs rely on external bucket lifecycle policy
   - Phase 4 now includes log-only usage observability and optional config-driven cost estimates for chat, image, and video generation
+  - Phase 4 now supports Telegram photo captions that start with `/image` or `/video` as reference-image generation commands
 
 ## Current State
 
@@ -45,6 +46,9 @@ As of `2026-05-14`, this repository contains the completed Phase 1 foundation, t
 - Inline generated video bytes remain transient in memory only, while URI-backed assets are expected to live in a bucket with lifecycle cleanup managed outside the app.
 - Phase 4 has started with a real webhook deployment path: webhook mode now registers the Telegram webhook on startup, validates the `X-Telegram-Bot-Api-Secret-Token` header on inbound requests, and reports webhook setup state through readiness.
 - Phase 4 now logs usage units and optional best-effort cost estimates for OpenAI chat, Vertex image generation, Vertex video submission, and completed video delivery without adding a metrics backend or billing reconciliation.
+- Photo captions that start with `/image <prompt>` use the photo as a transient reference image for Gemini image generation; Imagen remains prompt-to-image only.
+- Photo captions that start with `/video <prompt>` queue an image-to-video job using the photo as a transient reference image.
+- Normal photo captions that do not start with `/image` or `/video` continue through the OpenAI image-understanding path.
 
 ## Recommended Sequencing
 
@@ -239,6 +243,7 @@ Current Phase 4 progress:
 - readiness now treats missing webhook setup as not ready
 - chat, `/image`, `/video`, and completed video delivery now emit structured usage fields through the existing `log_kv(...)` log path
 - cost estimates are optional, configuration-driven, and disabled by default so pricing can be updated without code changes
+- `/image` and `/video` now accept a Telegram photo-caption reference image without storing raw reference bytes in SQLite
 
 ## Phase 5 - ElevenLabs Hindi Text To Speech
 

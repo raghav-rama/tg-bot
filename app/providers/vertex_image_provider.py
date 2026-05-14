@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 from typing import Any
 
 from app.domain.errors import ProviderTimeoutError, ProviderUpstreamError
-from app.domain.models import GeneratedImageResult, ImageGenerationRequest
+from app.domain.models import GeneratedImageResult, ImageGenerationRequest, ImageInput
 from app.providers.vertex_image_models import is_gemini_image_model
 
 
@@ -79,6 +81,12 @@ class VertexImageProvider:
         request: ImageGenerationRequest,
     ) -> GeneratedImageResult:
         resolved_model = request.model or self._default_model
+        if request.reference_image is not None and not is_gemini_image_model(
+            resolved_model
+        ):
+            raise ProviderUpstreamError(
+                "Reference image generation requires a Gemini image model"
+            )
         try:
             response = await asyncio.to_thread(self._generate_image_sync, request)
         except Exception as exc:
@@ -209,8 +217,39 @@ class VertexImageProvider:
                 image_config=image_config,
             )
 
+        contents: Any = request.prompt
+        if request.reference_image is not None:
+            reference_image_bytes = self._decode_reference_image(
+                request.reference_image
+            )
+            if self._types_module is not None:
+                contents = [
+                    self._types_module.Part.from_text(text=request.prompt),
+                    self._types_module.Part.from_bytes(
+                        data=reference_image_bytes,
+                        mime_type=request.reference_image.mime_type,
+                    ),
+                ]
+            else:
+                contents = [
+                    request.prompt,
+                    {
+                        "data": reference_image_bytes,
+                        "mime_type": request.reference_image.mime_type,
+                    },
+                ]
+
         return self._client.models.generate_content(
             model=resolved_model,
-            contents=request.prompt,
+            contents=contents,
             config=config,
         )
+
+    def _decode_reference_image(self, image: ImageInput) -> bytes:
+        try:
+            image_bytes = base64.b64decode(image.bytes_b64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ProviderUpstreamError("Reference image payload is invalid") from exc
+        if not image_bytes:
+            raise ProviderUpstreamError("Reference image payload is empty")
+        return image_bytes

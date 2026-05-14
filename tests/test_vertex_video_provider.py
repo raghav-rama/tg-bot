@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from app.domain.errors import ProviderTimeoutError
-from app.domain.models import VideoGenerationPollRequest, VideoGenerationRequest
+from app.domain.models import ImageInput, VideoGenerationPollRequest, VideoGenerationRequest
 from app.providers.vertex_video_provider import VertexVideoProvider
 
 
@@ -49,6 +51,36 @@ class _FakeAPIError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+class _FakeVideoTypesModule:
+    @staticmethod
+    def GenerateVideosConfig(**kwargs):
+        return kwargs
+
+    class Image:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    class GenerateVideosSource:
+        def __init__(self, **kwargs) -> None:
+            self.prompt = kwargs.get("prompt")
+            self.image = kwargs.get("image")
+            self.video = kwargs.get("video")
+
+
+def make_reference_image() -> ImageInput:
+    image_bytes = b"reference-image"
+    return ImageInput(
+        telegram_file_id="file-ref",
+        telegram_file_unique_id="uniq-ref",
+        mime_type="image/jpeg",
+        width=640,
+        height=480,
+        byte_size=len(image_bytes),
+        bytes_b64=base64.b64encode(image_bytes).decode("ascii"),
+        caption="/video animate this",
+    )
 
 
 def test_vertex_video_client_kwargs_prefer_adc_when_project_is_set() -> None:
@@ -107,6 +139,43 @@ async def test_submit_video_returns_operation_name() -> None:
     assert submitted.raw_model == "veo-3.0-fast-generate-001"
     assert models.calls[0]["prompt"] == "tracking shot through a glowing cave"
     assert models.calls[0]["config"]["duration_seconds"] == 4
+
+
+@pytest.mark.asyncio
+async def test_submit_video_passes_reference_image_to_generate_videos() -> None:
+    models = _FakeModels(response=type("Operation", (), {"name": "operations/123"})())
+    provider = VertexVideoProvider(
+        project="test-project",
+        location="us-central1",
+        default_model="veo-3.0-fast-generate-001",
+        default_aspect_ratio="16:9",
+        default_duration_seconds=4,
+        default_output_gcs_uri=None,
+        client=_FakeClient(models, _FakeOperations()),
+        types_module=_FakeVideoTypesModule,
+    )
+
+    submitted = await provider.submit_video(
+        VideoGenerationRequest(
+            chat_id=1,
+            user_id=42,
+            prompt="animate this scene",
+            model="veo-3.0-fast-generate-001",
+            aspect_ratio="16:9",
+            duration_seconds=4,
+            output_gcs_uri=None,
+            reference_image=make_reference_image(),
+        )
+    )
+
+    assert submitted.operation_name == "operations/123"
+    source = models.calls[0]["source"]
+    assert source.prompt == "animate this scene"
+    assert source.image.kwargs == {
+        "image_bytes": b"reference-image",
+        "mime_type": "image/jpeg",
+    }
+    assert "prompt" not in models.calls[0]
 
 
 @pytest.mark.asyncio

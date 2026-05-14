@@ -138,6 +138,7 @@ class ImageGenerationRequest:
     model: str
     aspect_ratio: str
     output_mime_type: str
+    reference_image: ImageInput | None = None
 
 
 @dataclass(slots=True)
@@ -186,6 +187,7 @@ class VideoGenerationRequest:
     aspect_ratio: str
     duration_seconds: int | None
     output_gcs_uri: str | None
+    reference_image: ImageInput | None = None
 
 
 @dataclass(slots=True)

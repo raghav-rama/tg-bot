@@ -10,6 +10,12 @@ This is an asynchronous product-scope phase. It does not reuse the Phase 1 or Ph
 
 Phase 3 is now accepted as complete for repo sequencing.
 
+Phase 4 reference-image note:
+
+- Phase 3 shipped text-to-video only.
+- Phase 4 extends `/video` so a Telegram photo captioned `/video <prompt>` can queue an image-to-video job using that photo as a transient reference image.
+- Raw reference photo bytes remain request-only inputs and are not persisted in SQLite.
+
 ## Source-Grounded API Facts
 
 The Phase 3 design assumes these currently documented facts:

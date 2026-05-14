@@ -62,6 +62,82 @@ def test_normalize_image_command_keeps_full_text() -> None:
     assert inbound.text == "/image watercolor fox in a flower field"
 
 
+def test_normalize_photo_caption_image_command_populates_reference_image() -> None:
+    update = build_update(
+        {
+            "message_id": 14,
+            "date": 1_776_000_000,
+            "chat": {"id": 123, "type": "private"},
+            "from": {"id": 42, "is_bot": False, "first_name": "Ritz", "username": "ritz"},
+            "caption": "/image stylize this as ink wash",
+            "photo": [
+                {
+                    "file_id": "small",
+                    "file_unique_id": "uniq-small",
+                    "width": 90,
+                    "height": 90,
+                    "file_size": 100,
+                },
+                {
+                    "file_id": "large",
+                    "file_unique_id": "uniq-large",
+                    "width": 1280,
+                    "height": 720,
+                    "file_size": 512,
+                },
+            ],
+        }
+    )
+
+    inbound = normalize_message(
+        message=update.message,
+        update_id=update.update_id,
+        image_bytes=b"reference-image",
+        image_max_bytes=1024,
+    )
+
+    assert inbound.message_type == "command"
+    assert inbound.command == "/image"
+    assert inbound.text == "/image stylize this as ink wash"
+    assert inbound.image is not None
+    assert inbound.image.telegram_file_id == "large"
+    assert inbound.image.byte_size == len(b"reference-image")
+
+
+def test_normalize_photo_caption_video_command_populates_reference_image() -> None:
+    update = build_update(
+        {
+            "message_id": 15,
+            "date": 1_776_000_000,
+            "chat": {"id": 123, "type": "private"},
+            "from": {"id": 42, "is_bot": False, "first_name": "Ritz", "username": "ritz"},
+            "caption": "/video animate this scene",
+            "photo": [
+                {
+                    "file_id": "large",
+                    "file_unique_id": "uniq-large",
+                    "width": 1280,
+                    "height": 720,
+                    "file_size": 512,
+                },
+            ],
+        }
+    )
+
+    inbound = normalize_message(
+        message=update.message,
+        update_id=update.update_id,
+        image_bytes=b"reference-image",
+        image_max_bytes=1024,
+    )
+
+    assert inbound.message_type == "command"
+    assert inbound.command == "/video"
+    assert inbound.text == "/video animate this scene"
+    assert inbound.image is not None
+    assert inbound.image.telegram_file_unique_id == "uniq-large"
+
+
 def test_normalize_photo_message() -> None:
     update = build_update(
         {

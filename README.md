@@ -15,6 +15,7 @@ Implemented today:
 - Telegram draft streaming for long-running text replies
 - `/image <prompt>` generation through Vertex AI and Telegram `sendPhoto`
 - `/video <prompt>` queued generation through Vertex AI, SQLite-backed jobs, background polling, and Telegram `sendVideo`
+- photo captions that start with `/image <prompt>` or `/video <prompt>` use the photo as a transient reference image for generation
 - log-only usage observability with optional config-driven cost estimates for chat, image, and video generation
 - health and readiness endpoints plus automated tests
 
@@ -34,6 +35,7 @@ Inbound inputs:
 
 - plain text messages
 - one photo with an optional caption
+- one photo with a caption that starts with `/image <prompt>` or `/video <prompt>`
 - commands: `/start`, `/help`, `/status`, `/reset`, `/image`, `/video`
 
 Outbound outputs:
@@ -49,9 +51,11 @@ Current constraints:
 - image-understanding requests use the final-only reply path by default
 - webhook mode requires a public HTTPS URL and validates `X-Telegram-Bot-Api-Secret-Token`
 - raw generated image and video bytes are not persisted in SQLite
+- raw reference photo bytes are transient request inputs and are not persisted in SQLite
 - live Telegram and Vertex verification still depends on real credentials and manual runtime checks
 - generated video bytes remain transient in memory only, and URI-backed assets should rely on external bucket lifecycle cleanup
 - Gemini image models use a separate preview path from Imagen; `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`
+- `/image` with a reference photo requires a Gemini image model; Imagen remains prompt-to-image only
 
 ## Architecture At A Glance
 
@@ -115,6 +119,7 @@ VERTEX_API_KEY=your-vertex-api-key
 # For Gemini 3 Pro Image preview, set:
 # VERTEX_IMAGE_MODEL=gemini-3-pro-image-preview
 # VERTEX_LOCATION=global
+# Reference-photo /image commands require a Gemini image model.
 
 # Optional log-only cost estimates; keep unset or 0 to disable.
 # VERTEX_IMAGE_COST_PER_IMAGE_USD=0
@@ -178,6 +183,7 @@ Image model notes:
 - Imagen remains the default `/image` model path and uses the dedicated Vertex `generate_images` API.
 - Gemini image models are supported through the Vertex `generate_content` API.
 - `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`.
+- To use a Telegram photo as a reference image, send the photo with a caption like `/image restyle this as a pencil sketch`; this requires a Gemini image model.
 
 Vertex video settings:
 
@@ -247,6 +253,12 @@ docker run --rm \
 - `/image <prompt>`: generate one image through Vertex AI
 - `/video <prompt>`: queue one short video through Vertex AI
 
+Reference-image commands:
+
+- send one photo with caption `/image <prompt>` to use that photo as the image-generation reference; this path requires a Gemini image model
+- send one photo with caption `/video <prompt>` to queue an image-to-video job using that photo as the first-frame reference
+- send one photo with any other caption to keep using the normal OpenAI image-understanding path
+
 ## Testing
 
 Run the test suite:
@@ -255,7 +267,7 @@ Run the test suite:
 uv run pytest
 ```
 
-The repository already includes tests for health and readiness, normalization, allowlist handling, history reuse, reset behavior, draft streaming and fallback, Telegram formatting, image generation, video job handling, and the Vertex provider flows.
+The repository already includes tests for health and readiness, normalization, allowlist handling, history reuse, reset behavior, draft streaming and fallback, Telegram formatting, image generation, reference-image command captions, video job handling, and the Vertex provider flows.
 
 ## Project Layout
 

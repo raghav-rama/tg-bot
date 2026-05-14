@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from app.domain.errors import ProviderTimeoutError, ProviderUpstreamError
-from app.domain.models import ImageGenerationRequest
+from app.domain.models import ImageGenerationRequest, ImageInput
 from app.providers.vertex_image_provider import VertexImageProvider
 
 
@@ -42,6 +44,43 @@ class _FakeAPIError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+class _FakeTypesModule:
+    class Modality:
+        TEXT = "TEXT"
+        IMAGE = "IMAGE"
+
+    class Part:
+        @staticmethod
+        def from_text(*, text: str):
+            return {"type": "text", "text": text}
+
+        @staticmethod
+        def from_bytes(*, data: bytes, mime_type: str):
+            return {"type": "bytes", "data": data, "mime_type": mime_type}
+
+    @staticmethod
+    def ImageConfig(**kwargs):
+        return kwargs
+
+    @staticmethod
+    def GenerateContentConfig(**kwargs):
+        return kwargs
+
+
+def make_reference_image() -> ImageInput:
+    image_bytes = b"reference-image"
+    return ImageInput(
+        telegram_file_id="file-ref",
+        telegram_file_unique_id="uniq-ref",
+        mime_type="image/png",
+        width=640,
+        height=480,
+        byte_size=len(image_bytes),
+        bytes_b64=base64.b64encode(image_bytes).decode("ascii"),
+        caption="/image stylize this",
+    )
 
 
 def test_vertex_image_client_kwargs_prefer_adc_when_project_is_set() -> None:
@@ -178,6 +217,109 @@ async def test_generate_image_routes_gemini_models_to_generate_content() -> None
             "output_mime_type": "image/jpeg",
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_generate_image_sends_reference_image_parts_for_gemini_model() -> None:
+    response = type(
+        "Response",
+        (),
+        {
+            "candidates": [
+                type(
+                    "Candidate",
+                    (),
+                    {
+                        "content": type(
+                            "Content",
+                            (),
+                            {
+                                "parts": [
+                                    type(
+                                        "Part",
+                                        (),
+                                        {
+                                            "inline_data": type(
+                                                "InlineData",
+                                                (),
+                                                {
+                                                    "data": b"gemini-image",
+                                                    "mime_type": "image/png",
+                                                },
+                                            )()
+                                        },
+                                    )(),
+                                ]
+                            },
+                        )()
+                    },
+                )()
+            ]
+        },
+    )()
+    models = _FakeModels(response=response)
+    provider = VertexImageProvider(
+        project="test-project",
+        location="global",
+        default_model="imagen-4.0-fast-generate-001",
+        default_aspect_ratio="1:1",
+        default_output_mime_type="image/jpeg",
+        client=_FakeClient(models),
+        types_module=_FakeTypesModule,
+    )
+
+    await provider.generate_image(
+        ImageGenerationRequest(
+            chat_id=1,
+            user_id=42,
+            prompt="Make this a watercolor poster",
+            model="gemini-3-pro-image-preview",
+            aspect_ratio="1:1",
+            output_mime_type="image/jpeg",
+            reference_image=make_reference_image(),
+        )
+    )
+
+    assert models.generate_images_calls == []
+    assert models.generate_content_calls[0]["contents"] == [
+        {"type": "text", "text": "Make this a watercolor poster"},
+        {"type": "bytes", "data": b"reference-image", "mime_type": "image/png"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_generate_image_rejects_reference_image_for_imagen_without_vertex_call() -> None:
+    models = _FakeModels(
+        response=type(
+            "Response",
+            (),
+            {"generated_images": [_FakeGeneratedImage(b"vertex-image")]},
+        )()
+    )
+    provider = VertexImageProvider(
+        project="test-project",
+        location="us-central1",
+        default_model="imagen-4.0-fast-generate-001",
+        default_aspect_ratio="1:1",
+        default_output_mime_type="image/jpeg",
+        client=_FakeClient(models),
+    )
+
+    with pytest.raises(ProviderUpstreamError, match="Gemini image model"):
+        await provider.generate_image(
+            ImageGenerationRequest(
+                chat_id=1,
+                user_id=42,
+                prompt="Make this a watercolor poster",
+                model="imagen-4.0-fast-generate-001",
+                aspect_ratio="1:1",
+                output_mime_type="image/jpeg",
+                reference_image=make_reference_image(),
+            )
+        )
+
+    assert models.generate_images_calls == []
+    assert models.generate_content_calls == []
 
 
 @pytest.mark.asyncio

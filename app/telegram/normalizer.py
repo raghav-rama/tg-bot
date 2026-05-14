@@ -72,6 +72,33 @@ def normalize_message(
             )
         largest = message.photo[-1]
         caption = message.caption.strip() if message.caption else None
+        image = ImageInput(
+            telegram_file_id=largest.file_id,
+            telegram_file_unique_id=largest.file_unique_id,
+            mime_type="image/jpeg",
+            width=largest.width,
+            height=largest.height,
+            byte_size=len(image_bytes),
+            bytes_b64=base64.b64encode(image_bytes).decode("ascii"),
+            caption=caption,
+        )
+        command = _extract_command(caption) if caption else None
+        if command in {"/image", "/video"}:
+            return InboundMessage(
+                update_id=update_id,
+                telegram_message_id=message.message_id,
+                chat_id=message.chat.id,
+                chat_type=message.chat.type,
+                user_id=message.from_user.id,
+                username=message.from_user.username,
+                first_name=message.from_user.first_name,
+                message_type="command",
+                text=caption,
+                command=command,
+                image=image,
+                sent_at=sent_at,
+            )
+
         return InboundMessage(
             update_id=update_id,
             telegram_message_id=message.message_id,
@@ -83,16 +110,7 @@ def normalize_message(
             message_type="image",
             text=caption,
             command=None,
-            image=ImageInput(
-                telegram_file_id=largest.file_id,
-                telegram_file_unique_id=largest.file_unique_id,
-                mime_type="image/jpeg",
-                width=largest.width,
-                height=largest.height,
-                byte_size=len(image_bytes),
-                bytes_b64=base64.b64encode(image_bytes).decode("ascii"),
-                caption=caption,
-            ),
+            image=image,
             sent_at=sent_at,
         )
 
