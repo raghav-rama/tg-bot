@@ -11,7 +11,9 @@ _REPO_ENV_KEYS = (
     "BOT_DRAFT_UPDATE_INTERVAL_MS",
     "BOT_DRAFT_MIN_CHARS_DELTA",
     "BOT_VIDEO_MAX_BYTES",
+    "OPENAI_INPUT_COST_PER_1M_TOKENS_USD",
     "OPENAI_MODEL",
+    "OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD",
     "OPENAI_TEMPERATURE",
     "OPENAI_MAX_OUTPUT_TOKENS",
     "TELEGRAM_BOT_TOKEN",
@@ -24,9 +26,11 @@ _REPO_ENV_KEYS = (
     "VERTEX_IMAGE_ASPECT_RATIO",
     "VERTEX_IMAGE_MODEL",
     "VERTEX_IMAGE_OUTPUT_MIME_TYPE",
+    "VERTEX_IMAGE_COST_PER_IMAGE_USD",
     "VERTEX_LOCATION",
     "VERTEX_PROJECT_ID",
     "VERTEX_VIDEO_ASPECT_RATIO",
+    "VERTEX_VIDEO_COST_PER_SECOND_USD",
     "VERTEX_VIDEO_DURATION_SECONDS",
     "VERTEX_VIDEO_MODEL",
     "VERTEX_VIDEO_OUTPUT_GCS_URI",
@@ -64,8 +68,35 @@ def test_draft_streaming_defaults_are_conservative(tmp_path, monkeypatch) -> Non
     assert settings.bot_video_max_bytes == 50 * 1024 * 1024
     assert settings.telegram_video_request_timeout_seconds == 180
     assert settings.video_job_poll_interval_seconds == 15
+    assert settings.openai_input_cost_per_1m_tokens_usd == 0.0
+    assert settings.openai_output_cost_per_1m_tokens_usd == 0.0
+    assert settings.vertex_image_cost_per_image_usd == 0.0
+    assert settings.vertex_video_cost_per_second_usd == 0.0
     assert settings.vertex_image_generation_enabled is False
     assert settings.vertex_video_generation_enabled is False
+
+
+def test_cost_estimate_rates_can_be_configured(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        OPENAI_INPUT_COST_PER_1M_TOKENS_USD="0.4",
+        OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD="1.6",
+        VERTEX_IMAGE_COST_PER_IMAGE_USD="0.05",
+        VERTEX_VIDEO_COST_PER_SECOND_USD="0.35",
+    )
+
+    assert settings.openai_input_cost_per_1m_tokens_usd == 0.4
+    assert settings.openai_output_cost_per_1m_tokens_usd == 1.6
+    assert settings.vertex_image_cost_per_image_usd == 0.05
+    assert settings.vertex_video_cost_per_second_usd == 0.35
 
 
 def test_vertex_api_key_also_enables_image_generation(tmp_path, monkeypatch) -> None:

@@ -13,6 +13,7 @@ from app.domain.commands import (
     EMPTY_TEXT_TEXT,
     GENERIC_FAILURE_TEXT,
     IMAGE_GENERATION_NOT_CONFIGURED_TEXT,
+    IMAGE_REFERENCE_REQUIRES_GEMINI_TEXT,
     IMAGE_GENERATION_RETRY_TEXT,
     IMAGE_PROMPT_REQUIRED_TEXT,
     PROVIDER_RETRY_TEXT,
@@ -47,9 +48,15 @@ from app.domain.models import (
     VideoGenerationRequest,
 )
 from app.logging import log_kv
+from app.observability import (
+    estimate_image_usage,
+    estimate_openai_usage,
+    estimate_video_usage,
+)
 from app.providers.base import AIProvider, ImageGenerator, VideoGenerator
 from app.providers.vertex_image_models import (
     image_generation_api_method,
+    is_gemini_image_model,
     requires_global_location,
 )
 from app.storage.conversations import ConversationRepository
@@ -241,6 +248,7 @@ class ChatService:
                     model=model_name,
                     latency_ms=latency_ms,
                     delivered=reply.delivered,
+                    **reply.usage_fields,
                 )
             )
             return reply
@@ -418,6 +426,16 @@ class ChatService:
             await self.conversations.touch(conversation.id)
             return ServiceReply(text=IMAGE_GENERATION_NOT_CONFIGURED_TEXT)
 
+        if message.image is not None and not is_gemini_image_model(
+            self.settings.vertex_image_model
+        ):
+            await self._persist_command_reply(
+                conversation,
+                IMAGE_REFERENCE_REQUIRES_GEMINI_TEXT,
+            )
+            await self.conversations.touch(conversation.id)
+            return ServiceReply(text=IMAGE_REFERENCE_REQUIRES_GEMINI_TEXT)
+
         try:
             generated_image = await self.image_generator.generate_image(
                 ImageGenerationRequest(
@@ -427,6 +445,7 @@ class ChatService:
                     model=self.settings.vertex_image_model,
                     aspect_ratio=self.settings.vertex_image_aspect_ratio,
                     output_mime_type=self.settings.vertex_image_output_mime_type,
+                    reference_image=message.image,
                 )
             )
         except (ProviderTimeoutError, ProviderUpstreamError):
@@ -464,7 +483,23 @@ class ChatService:
             sent_photo=sent_photo,
         )
         await self.conversations.touch(conversation.id)
-        return ServiceReply(text="", delivered=True)
+        usage_fields = estimate_image_usage(
+            prompt=prompt,
+            generated_images=1,
+            cost_per_image_usd=self.settings.vertex_image_cost_per_image_usd,
+        )
+        usage_fields.update(
+            {
+                "api_method": image_generation_api_method(
+                    self.settings.vertex_image_model
+                ),
+                "mime_type": generated_image.mime_type,
+                "telegram_message_id": sent_photo.telegram_message_id,
+                "telegram_file_id": sent_photo.telegram_file_id,
+                "file_size": sent_photo.file_size,
+            }
+        )
+        return ServiceReply(text="", delivered=True, usage_fields=usage_fields)
 
     async def _handle_video_command(
         self,
@@ -490,17 +525,22 @@ class ChatService:
             return ServiceReply(text=VIDEO_GENERATION_NOT_CONFIGURED_TEXT)
 
         await self._persist_user_command_message(conversation, message)
+        usage_fields = estimate_video_usage(
+            prompt=prompt,
+            duration_seconds=self.settings.vertex_video_duration_seconds,
+            cost_per_second_usd=self.settings.vertex_video_cost_per_second_usd,
+        )
         self.logger.info(
             log_kv(
                 "video_generation_requested",
                 update_id=message.update_id,
                 chat_id=message.chat_id,
                 user_id=message.user_id,
+                provider="vertex",
                 model=self.settings.vertex_video_model,
-                prompt_chars=len(prompt),
                 aspect_ratio=self.settings.vertex_video_aspect_ratio,
-                duration_seconds=self.settings.vertex_video_duration_seconds,
                 output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
+                **usage_fields,
             )
         )
         submitted_job = await self.video_generator.submit_video(
@@ -512,6 +552,7 @@ class ChatService:
                 aspect_ratio=self.settings.vertex_video_aspect_ratio,
                 duration_seconds=self.settings.vertex_video_duration_seconds,
                 output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
+                reference_image=message.image,
             )
         )
         self.logger.info(
@@ -520,6 +561,7 @@ class ChatService:
                 update_id=message.update_id,
                 chat_id=message.chat_id,
                 user_id=message.user_id,
+                provider=submitted_job.provider,
                 operation_name=submitted_job.operation_name,
                 model=submitted_job.raw_model,
             )
@@ -538,7 +580,7 @@ class ChatService:
         )
         await self._persist_command_reply(conversation, VIDEO_GENERATION_QUEUED_TEXT)
         await self.conversations.touch(conversation.id)
-        return ServiceReply(text=VIDEO_GENERATION_QUEUED_TEXT)
+        return ServiceReply(text=VIDEO_GENERATION_QUEUED_TEXT, usage_fields=usage_fields)
 
     async def _persist_command_exchange(
         self,
@@ -560,7 +602,7 @@ class ChatService:
             telegram_message_id=message.telegram_message_id,
             message_type="command",
             text=message.text or message.command,
-            image=None,
+            image=message.image,
             created_at=message.sent_at,
         )
 
@@ -719,7 +761,29 @@ class ChatService:
                     message=message,
                 )
 
-            return ServiceReply(text=reply_text)
+            usage_fields = estimate_openai_usage(
+                input_tokens=(
+                    completion_event.input_tokens if completion_event else None
+                ),
+                output_tokens=(
+                    completion_event.output_tokens if completion_event else None
+                ),
+                input_cost_per_1m_tokens_usd=(
+                    self.settings.openai_input_cost_per_1m_tokens_usd
+                ),
+                output_cost_per_1m_tokens_usd=(
+                    self.settings.openai_output_cost_per_1m_tokens_usd
+                ),
+            )
+            if completion_event is not None:
+                usage_fields.update(
+                    {
+                        "provider_message_id": completion_event.provider_message_id,
+                        "finish_reason": completion_event.finish_reason,
+                        "raw_model": completion_event.raw_model,
+                    }
+                )
+            return ServiceReply(text=reply_text, usage_fields=usage_fields)
         except Exception:
             if draft_session is not None:
                 await self._cancel_draft_session(

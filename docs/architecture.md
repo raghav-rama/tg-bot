@@ -2,13 +2,13 @@
 
 ## Summary
 
-This document defines Phase 1 only.
+This document defines the Phase 1 runtime architecture first. Later sections may capture extension boundaries for planned roadmap phases, but [roadmap.md](roadmap.md) remains the source of truth for phase status and scope.
 
 Phase 1 is a private Telegram bot for a YouTube channel workflow. It accepts text and image messages from approved Telegram users, sends the request to OpenAI, stores conversation memory in SQLite, and returns a text assistant reply back to Telegram.
 
 The service shell is `FastAPI`. The initial runtime mode is polling, but the application structure must keep Telegram ingestion separate from business logic so webhook delivery can be added later without rewriting handlers or provider code.
 
-Planned post-Phase-1 work, including Google Gemini / Vertex AI image and video generation, is tracked in [roadmap.md](roadmap.md).
+Planned post-Phase-1 work, including Google Gemini / Vertex AI image/video generation and Phase 5 ElevenLabs text-to-speech, is tracked in [roadmap.md](roadmap.md).
 
 ## Goals
 
@@ -24,8 +24,10 @@ Planned post-Phase-1 work, including Google Gemini / Vertex AI image and video g
 - Voice notes, video, files, stickers, or media groups
 - Generated image replies in Phase 1
 - Generated video replies in Phase 1
+- Generated speech or text-to-speech replies in Phase 1
 - Admin panel or database-backed allowlist management
 - Google Gemini / Vertex AI integration in Phase 1
+- ElevenLabs integration in Phase 1
 - Multi-provider orchestration in Phase 1
 - Retrieval, search, or external workflow automation beyond reply generation
 
@@ -206,6 +208,8 @@ Commands are handled in the chat service, not in Telegram-specific code.
 - `/status`: show service mode, configured model, and whether memory is enabled.
 - `/reset`: archive the active conversation for that chat and start a new empty one.
 
+Later phases may add dedicated generation commands such as `/image`, `/video`, and `/tts`, but they should still enter through the same normalized command pipeline and remain routed by the chat service rather than Telegram-specific handlers.
+
 ## Persistence Design
 
 ### Allowlist source
@@ -301,6 +305,79 @@ Use a configurable system prompt with a default focused on channel-assistant beh
 
 The system prompt must be configurable through environment variables so it can be tuned without code changes.
 
+## Phase 5 Text-To-Speech Extension
+
+Phase 5 adds generated speech output after the Phase 4 hardening work tracked in [roadmap.md](roadmap.md).
+
+### Command boundary
+
+- Add `/tts <text>` as an explicit command rather than overloading normal chat messages.
+- Treat the text after `/tts` as the speech input.
+- Start with Hindi text as the supported content target.
+- Keep `/tts` independent from conversation-memory generation; it should not ask OpenAI to rewrite, translate, or expand the supplied text in the first milestone.
+- Missing command text should return a deterministic usage message before any provider call.
+
+### Provider boundary
+
+Add a dedicated text-to-speech provider interface instead of widening `AIProvider`, `ImageGenerator`, or `VideoGenerator`.
+
+The provider request should include:
+
+- `chat_id`
+- `user_id`
+- `text`
+- `voice_id`
+- `model`
+- `output_format`
+- optional `language_code`
+
+The provider response should include:
+
+- generated audio bytes
+- MIME type or output format
+- provider name
+- raw model name
+- voice ID
+- source text
+- optional duration and file size when known
+
+The first concrete implementation should use ElevenLabs text-to-speech with:
+
+- default voice ID: `vIdhHAZdn1bGjKe1dFw8`
+- default model: `eleven_multilingual_v2`
+- default language code: `hi` when supported by the SDK or REST path
+- default output format: MP3 unless an OGG/Opus output is selected and verified against Telegram delivery
+
+### Telegram delivery boundary
+
+The Telegram adapter should remain transport-only:
+
+- convert generated audio bytes to an aiogram `BufferedInputFile`
+- send the result with Telegram `sendVoice`
+- return Telegram delivery metadata such as message ID, file ID, unique file ID, duration, MIME type, and file size when available
+- avoid provider-specific decisions in Telegram code
+
+`sendAudio` can remain a later option for music-player style output. `sendDocument` should only be a fallback if the generated file cannot be delivered as a voice message.
+
+### Persistence boundary
+
+- Persist the user `/tts` command as command history.
+- Persist a lightweight assistant event row or generated-audio metadata if needed for traceability.
+- Do not persist raw generated audio bytes in SQLite.
+- Reusing Telegram `file_id` for repeated identical outputs is a later optimization, not required for the first milestone.
+
+### Phase 5 configuration
+
+Phase 5 should add environment-driven configuration such as:
+
+- `ELEVENLABS_API_KEY`
+- `ELEVENLABS_TTS_VOICE_ID`
+- `ELEVENLABS_TTS_MODEL`
+- `ELEVENLABS_TTS_OUTPUT_FORMAT`
+- `BOT_TTS_MAX_CHARS`
+
+These settings are not part of the Phase 1 required environment contract.
+
 ## Configuration
 
 Use environment-driven configuration loaded once at startup.
@@ -324,7 +401,7 @@ Recommended variables:
 - `BOT_HISTORY_MAX_TURNS`
 - `BOT_IMAGE_MAX_BYTES`
 
-Google / Vertex credentials are intentionally excluded from the Phase 1 environment contract.
+Google / Vertex and ElevenLabs credentials are intentionally excluded from the Phase 1 environment contract.
 
 Defaults:
 

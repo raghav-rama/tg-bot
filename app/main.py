@@ -55,9 +55,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         try:
             loaded_settings = settings or Settings()
+            container.settings = loaded_settings
             configure_logging(loaded_settings.app_log_level)
 
             database = Database(loaded_settings.sqlite_path)
+            container.database = database
             await database.connect()
             await database.initialize()
 
@@ -65,10 +67,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             messages = MessageRepository(database)
             generated_images = GeneratedImageRepository(database)
             generation_jobs = GenerationJobRepository(database)
+            container.conversations = conversations
+            container.messages = messages
+            container.generated_images = generated_images
+            container.generation_jobs = generation_jobs
             provider = OpenAIProvider(
                 api_key=loaded_settings.openai_api_key.get_secret_value(),
                 timeout_seconds=loaded_settings.openai_timeout_seconds,
             )
+            container.provider = provider
             image_generator = None
             if loaded_settings.vertex_image_generation_enabled:
                 image_generator = VertexImageProvider(
@@ -83,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     default_aspect_ratio=loaded_settings.vertex_image_aspect_ratio,
                     default_output_mime_type=loaded_settings.vertex_image_output_mime_type,
                 )
+                container.image_generator = image_generator
             video_generator = None
             if loaded_settings.vertex_video_generation_enabled:
                 video_generator = VertexVideoProvider(
@@ -98,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     default_duration_seconds=loaded_settings.vertex_video_duration_seconds,
                     default_output_gcs_uri=loaded_settings.vertex_video_output_gcs_uri,
                 )
+                container.video_generator = video_generator
             chat_service = ChatService(
                 settings=loaded_settings,
                 conversations=conversations,
@@ -108,6 +117,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 generation_jobs=generation_jobs,
                 video_generator=video_generator,
             )
+            container.chat_service = chat_service
             processor = TelegramUpdateProcessor(
                 chat_service=chat_service,
                 settings=loaded_settings,
@@ -116,6 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 token=loaded_settings.telegram_bot_token,
                 processor=processor,
             )
+            container.telegram_runtime = telegram_runtime
             if loaded_settings.app_update_mode == "polling":
                 await telegram_runtime.start()
             else:
@@ -146,22 +157,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         ),
                     ),
                 )
+                container.video_job_worker = video_job_worker
                 await video_job_worker.start()
 
-            container = AppContainer(
-                settings=loaded_settings,
-                database=database,
-                conversations=conversations,
-                messages=messages,
-                generated_images=generated_images,
-                generation_jobs=generation_jobs,
-                provider=provider,
-                image_generator=image_generator,
-                video_generator=video_generator,
-                chat_service=chat_service,
-                telegram_runtime=telegram_runtime,
-                video_job_worker=video_job_worker,
-            )
             app.state.container = container
             logger.info(
                 log_kv(

@@ -14,6 +14,7 @@ from app.domain.errors import ProviderTimeoutError, ProviderUpstreamError
 from app.domain.interfaces import ResponseEmitter
 from app.domain.models import StoredGenerationJob, VideoGenerationPollRequest
 from app.logging import log_kv
+from app.observability import estimate_video_usage
 from app.providers.base import VideoGenerator
 from app.storage.conversations import ConversationRepository
 from app.storage.generation_jobs import GenerationJobRepository
@@ -295,12 +296,26 @@ class VideoJobWorker:
             file_size=sent_video.file_size or video_size,
         )
         await self.conversations.touch(job.conversation_id)
+        delivered_duration_seconds = (
+            sent_video.duration_seconds
+            or generated_video.duration_seconds
+            or job.duration_seconds
+        )
+        completed_usage_fields = estimate_video_usage(
+            prompt=job.prompt_text,
+            duration_seconds=delivered_duration_seconds,
+            cost_per_second_usd=self.settings.vertex_video_cost_per_second_usd,
+        )
         self.logger.info(
             log_kv(
                 "video_job_completed",
                 job_id=job.id,
                 chat_id=job.chat_id,
                 operation_name=job.operation_name,
+                provider=generated_video.provider or job.provider,
+                model=generated_video.raw_model or job.model,
+                file_size=sent_video.file_size or video_size,
+                **completed_usage_fields,
             )
         )
 

@@ -56,6 +56,12 @@ Reasons:
 
 This keeps Imagen as the default while allowing explicit Gemini image-model configuration when needed.
 
+Phase 4 reference-image note:
+
+- Phase 2 delivered prompt-to-image generation only.
+- Phase 4 extends `/image` so a Telegram photo captioned `/image <prompt>` can use that photo as a transient reference image.
+- Reference-photo `/image` requests require a Gemini image model because Imagen remains on the dedicated prompt-to-image `generate_images` path.
+
 ## Architecture Delta From Phase 1.5
 
 Phase 2 keeps the same major layers and adds one new provider path plus one new outbound transport path.

@@ -109,7 +109,11 @@ class TelegramRuntime:
     async def _run_polling(self) -> None:
         try:
             await self.delete_webhook(drop_pending_updates=False)
-            await self.dispatcher.start_polling(self.bot)
+            await self.dispatcher.start_polling(
+                self.bot,
+                handle_signals=False,
+                close_bot_session=False,
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:

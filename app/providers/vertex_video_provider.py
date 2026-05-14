@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -8,6 +10,7 @@ from typing import Any
 from app.domain.errors import ProviderTimeoutError, ProviderUpstreamError
 from app.domain.models import (
     GeneratedVideoResult,
+    ImageInput,
     SubmittedVideoJob,
     VideoGenerationPollRequest,
     VideoGenerationRequest,
@@ -111,6 +114,7 @@ class VertexVideoProvider:
                     else self._default_duration_seconds
                 ),
                 output_gcs_uri=request.output_gcs_uri or self._default_output_gcs_uri,
+                reference_image=bool(request.reference_image),
                 prompt_chars=len(request.prompt),
                 auth_mode=self._auth_mode,
             )
@@ -134,6 +138,7 @@ class VertexVideoProvider:
                         output_gcs_uri=(
                             request.output_gcs_uri or self._default_output_gcs_uri
                         ),
+                        reference_image=bool(request.reference_image),
                         error_code=getattr(exc, "code", None),
                         error_message=self._error_message(exc),
                         error_details=self._error_details(exc),
@@ -240,22 +245,53 @@ class VertexVideoProvider:
             config = self._types_module.GenerateVideosConfig(**config_kwargs)
 
         model = request.model or self._default_model
+        reference_image = (
+            self._build_reference_image(request.reference_image)
+            if request.reference_image is not None
+            else None
+        )
         if self._types_module is not None and hasattr(
             self._types_module,
             "GenerateVideosSource",
         ):
-            source = self._types_module.GenerateVideosSource(prompt=request.prompt)
+            source_kwargs: dict[str, Any] = {"prompt": request.prompt}
+            if reference_image is not None:
+                source_kwargs["image"] = reference_image
+            source = self._types_module.GenerateVideosSource(**source_kwargs)
             return self._client.models.generate_videos(
                 model=model,
                 source=source,
                 config=config,
             )
 
+        generate_kwargs: dict[str, Any] = {
+            "model": model,
+            "prompt": request.prompt,
+            "config": config,
+        }
+        if reference_image is not None:
+            generate_kwargs["image"] = reference_image
         return self._client.models.generate_videos(
-            model=model,
-            prompt=request.prompt,
-            config=config,
+            **generate_kwargs,
         )
+
+    def _build_reference_image(self, image: ImageInput) -> Any:
+        try:
+            image_bytes = base64.b64decode(image.bytes_b64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ProviderUpstreamError("Reference image payload is invalid") from exc
+        if not image_bytes:
+            raise ProviderUpstreamError("Reference image payload is empty")
+
+        if self._types_module is not None:
+            return self._types_module.Image(
+                image_bytes=image_bytes,
+                mime_type=image.mime_type,
+            )
+        return {
+            "image_bytes": image_bytes,
+            "mime_type": image.mime_type,
+        }
 
     def _poll_video_sync(
         self,

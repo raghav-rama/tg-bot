@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 MessageType = Literal["text", "image", "command"]
 Role = Literal["user", "assistant"]
@@ -138,6 +138,7 @@ class ImageGenerationRequest:
     model: str
     aspect_ratio: str
     output_mime_type: str
+    reference_image: ImageInput | None = None
 
 
 @dataclass(slots=True)
@@ -186,6 +187,7 @@ class VideoGenerationRequest:
     aspect_ratio: str
     duration_seconds: int | None
     output_gcs_uri: str | None
+    reference_image: ImageInput | None = None
 
 
 @dataclass(slots=True)
@@ -270,3 +272,4 @@ class ServiceReply:
     error_type: str | None = None
     delivered: bool = False
     suppressed: bool = False
+    usage_fields: dict[str, Any] = field(default_factory=dict)

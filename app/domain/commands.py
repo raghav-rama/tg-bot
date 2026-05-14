@@ -15,6 +15,10 @@ IMAGE_PROMPT_REQUIRED_TEXT = (
     "Use /image followed by a prompt, for example: /image cinematic neon city skyline at night"
 )
 IMAGE_GENERATION_NOT_CONFIGURED_TEXT = "Image generation is not configured right now."
+IMAGE_REFERENCE_REQUIRES_GEMINI_TEXT = (
+    "Reference images for /image require a Gemini image model. "
+    "Set VERTEX_IMAGE_MODEL to a Gemini image model and try again."
+)
 IMAGE_GENERATION_RETRY_TEXT = (
     "I couldn't generate an image just now. Please try again in a moment."
 )
