@@ -15,6 +15,7 @@ Implemented today:
 - Telegram draft streaming for long-running text replies
 - `/image <prompt>` generation through Vertex AI and Telegram `sendPhoto`
 - `/video <prompt>` queued generation through Vertex AI, SQLite-backed jobs, background polling, and Telegram `sendVideo`
+- log-only usage observability with optional config-driven cost estimates for chat, image, and video generation
 - health and readiness endpoints plus automated tests
 
 Local planning docs remain the source of truth for scope and sequencing:
@@ -100,6 +101,9 @@ OPENAI_MODEL=gpt-4.1-mini
 OPENAI_TEMPERATURE=0.2
 OPENAI_MAX_OUTPUT_TOKENS=500
 OPENAI_TIMEOUT_SECONDS=45
+# Optional log-only cost estimates; keep unset or 0 to disable.
+# OPENAI_INPUT_COST_PER_1M_TOKENS_USD=0
+# OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD=0
 
 # Optional Vertex configuration for /image and /video
 # For local testing, an API key is enough.
@@ -111,6 +115,10 @@ VERTEX_API_KEY=your-vertex-api-key
 # For Gemini 3 Pro Image preview, set:
 # VERTEX_IMAGE_MODEL=gemini-3-pro-image-preview
 # VERTEX_LOCATION=global
+
+# Optional log-only cost estimates; keep unset or 0 to disable.
+# VERTEX_IMAGE_COST_PER_IMAGE_USD=0
+# VERTEX_VIDEO_COST_PER_SECOND_USD=0
 ```
 
 3. Start the app:
@@ -144,6 +152,8 @@ Chat settings:
 - `OPENAI_TEMPERATURE`
 - `OPENAI_MAX_OUTPUT_TOKENS`
 - `OPENAI_TIMEOUT_SECONDS`
+- `OPENAI_INPUT_COST_PER_1M_TOKENS_USD`: optional log-only estimate rate, default `0`
+- `OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD`: optional log-only estimate rate, default `0`
 
 Draft streaming settings:
 
@@ -161,6 +171,7 @@ Vertex image settings:
 - `VERTEX_IMAGE_MODEL`
 - `VERTEX_IMAGE_ASPECT_RATIO`
 - `VERTEX_IMAGE_OUTPUT_MIME_TYPE`
+- `VERTEX_IMAGE_COST_PER_IMAGE_USD`: optional log-only estimate rate, default `0`
 
 Image model notes:
 
@@ -177,6 +188,13 @@ Vertex video settings:
 - `BOT_VIDEO_MAX_BYTES`
 - `TELEGRAM_VIDEO_REQUEST_TIMEOUT_SECONDS`
 - `VIDEO_JOB_POLL_INTERVAL_SECONDS`
+- `VERTEX_VIDEO_COST_PER_SECOND_USD`: optional log-only estimate rate, default `0`
+
+Observability notes:
+
+- usage and cost estimate fields are emitted through normal application logs
+- cost estimates are disabled by default and are not billing reconciliation
+- keep the estimate rates current in configuration when provider pricing changes
 
 The complete environment contract lives in [app/config.py](app/config.py).
 

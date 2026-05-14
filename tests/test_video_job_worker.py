@@ -113,6 +113,50 @@ async def test_worker_completes_video_job_and_delivers_video(service_bundle) -> 
     ]
 
 
+async def test_worker_logs_completion_usage_and_cost_estimate(
+    service_bundle,
+    caplog,
+) -> None:
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
+    settings = service_bundle["settings"]
+    video_generator = service_bundle["video_generator"]
+
+    settings.vertex_video_cost_per_second_usd = 0.35
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=504,
+            command="/video slow orbit around a crystal sculpture in morning fog",
+            update_id=5,
+        )
+    )
+    conversation = await conversations.get_active(504)
+    assert conversation is not None
+
+    emitter = RecordingEmitter()
+    worker = VideoJobWorker(
+        settings=settings,
+        conversations=conversations,
+        messages=service_bundle["messages"],
+        generation_jobs=generation_jobs,
+        video_generator=video_generator,
+        emitter_factory=lambda _chat_id: emitter,
+    )
+
+    with caplog.at_level("INFO", logger="app.workers.video_jobs"):
+        await worker.run_once()
+
+    assert "video_job_completed" in caplog.text
+    assert "provider=vertex" in caplog.text
+    assert "model=veo-3.0-fast-generate-001" in caplog.text
+    assert "duration_seconds=4" in caplog.text
+    assert "file_size=" in caplog.text
+    assert "cost_estimate_available=True" in caplog.text
+    assert "cost_estimated_usd=1.4" in caplog.text
+
+
 async def test_worker_marks_job_failed_when_generation_fails(service_bundle) -> None:
     service = service_bundle["service"]
     conversations = service_bundle["conversations"]

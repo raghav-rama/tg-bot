@@ -55,6 +55,14 @@ class Settings(BaseSettings):
         default=45.0,
         alias="OPENAI_TIMEOUT_SECONDS",
     )
+    openai_input_cost_per_1m_tokens_usd: float = Field(
+        default=0.0,
+        alias="OPENAI_INPUT_COST_PER_1M_TOKENS_USD",
+    )
+    openai_output_cost_per_1m_tokens_usd: float = Field(
+        default=0.0,
+        alias="OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD",
+    )
     bot_system_prompt: str = Field(
         default=DEFAULT_SYSTEM_PROMPT,
         alias="BOT_SYSTEM_PROMPT",
@@ -99,6 +107,10 @@ class Settings(BaseSettings):
         default="image/jpeg",
         alias="VERTEX_IMAGE_OUTPUT_MIME_TYPE",
     )
+    vertex_image_cost_per_image_usd: float = Field(
+        default=0.0,
+        alias="VERTEX_IMAGE_COST_PER_IMAGE_USD",
+    )
     vertex_video_model: str = Field(
         default="veo-3.0-fast-generate-001",
         alias="VERTEX_VIDEO_MODEL",
@@ -114,6 +126,10 @@ class Settings(BaseSettings):
     vertex_video_output_gcs_uri: str | None = Field(
         default=None,
         alias="VERTEX_VIDEO_OUTPUT_GCS_URI",
+    )
+    vertex_video_cost_per_second_usd: float = Field(
+        default=0.0,
+        alias="VERTEX_VIDEO_COST_PER_SECOND_USD",
     )
     bot_video_max_bytes: int = Field(
         default=50 * 1024 * 1024,
@@ -234,6 +250,18 @@ class Settings(BaseSettings):
             return None
         if value <= 0:
             raise ValueError("video settings must be greater than zero")
+        return value
+
+    @field_validator(
+        "openai_input_cost_per_1m_tokens_usd",
+        "openai_output_cost_per_1m_tokens_usd",
+        "vertex_image_cost_per_image_usd",
+        "vertex_video_cost_per_second_usd",
+    )
+    @classmethod
+    def validate_non_negative_floats(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError("cost estimate rates must be zero or greater")
         return value
 
     @model_validator(mode="after")

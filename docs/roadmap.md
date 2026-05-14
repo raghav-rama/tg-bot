@@ -15,7 +15,7 @@ This document separates the current repo state from the planned delivery phases.
 
 - Active phase: `Phase 4 - Hardening And Expansion`
 - Status: `in_progress`
-- Last updated: `2026-04-15`
+- Last updated: `2026-05-14`
 - Previous phase accepted: `Phase 3 - Vertex Video Generation`
 - Evidence:
   - Phase 1 foundation work is accepted as complete for repo sequencing
@@ -25,10 +25,11 @@ This document separates the current repo state from the planned delivery phases.
   - video generation now uses persisted `generation_jobs` rows plus a background polling worker instead of blocking the original request path
   - completed video jobs now deliver through Telegram `sendVideo`
   - video asset retention rules are now explicit: inline bytes stay transient in memory, while URI-backed outputs rely on external bucket lifecycle policy
+  - Phase 4 now includes log-only usage observability and optional config-driven cost estimates for chat, image, and video generation
 
 ## Current State
 
-As of `2026-04-15`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, and the completed Phase 3 video-generation slice.
+As of `2026-05-14`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, and the completed Phase 3 video-generation slice.
 
 - Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, OpenAI chat, and Vertex image plus video generation.
 - A polling-first runtime exists, and webhook mode now reuses the same shared processing path when enabled.
@@ -43,6 +44,7 @@ As of `2026-04-15`, this repository contains the completed Phase 1 foundation, t
 - Real Vertex and Telegram verification still depends on configured credentials and a manual runtime check.
 - Inline generated video bytes remain transient in memory only, while URI-backed assets are expected to live in a bucket with lifecycle cleanup managed outside the app.
 - Phase 4 has started with a real webhook deployment path: webhook mode now registers the Telegram webhook on startup, validates the `X-Telegram-Bot-Api-Secret-Token` header on inbound requests, and reports webhook setup state through readiness.
+- Phase 4 now logs usage units and optional best-effort cost estimates for OpenAI chat, Vertex image generation, Vertex video submission, and completed video delivery without adding a metrics backend or billing reconciliation.
 
 ## Recommended Sequencing
 
@@ -235,6 +237,8 @@ Current Phase 4 progress:
 - webhook mode now self-registers against Telegram with `setWebhook`
 - webhook mode now requires and validates a Telegram secret token header
 - readiness now treats missing webhook setup as not ready
+- chat, `/image`, `/video`, and completed video delivery now emit structured usage fields through the existing `log_kv(...)` log path
+- cost estimates are optional, configuration-driven, and disabled by default so pricing can be updated without code changes
 
 ## Phase 5 - ElevenLabs Hindi Text To Speech
 

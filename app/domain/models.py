@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 MessageType = Literal["text", "image", "command"]
 Role = Literal["user", "assistant"]
@@ -270,3 +270,4 @@ class ServiceReply:
     error_type: str | None = None
     delivered: bool = False
     suppressed: bool = False
+    usage_fields: dict[str, Any] = field(default_factory=dict)

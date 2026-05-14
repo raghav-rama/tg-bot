@@ -220,6 +220,30 @@ async def test_history_is_reused_for_follow_up_messages(service_bundle) -> None:
     assert provider.calls[1].history[1].text == "assistant reply"
 
 
+async def test_text_message_logs_token_usage_and_cost_estimate(
+    service_bundle,
+    caplog,
+) -> None:
+    service = service_bundle["service"]
+
+    service.settings.openai_input_cost_per_1m_tokens_usd = 0.4
+    service.settings.openai_output_cost_per_1m_tokens_usd = 1.6
+
+    with caplog.at_level("INFO", logger="app.domain.services"):
+        await service.handle_inbound(
+            make_text_message(user_id=42, chat_id=101, text="estimate this"),
+        )
+
+    assert "message_processed" in caplog.text
+    assert "provider=openai" in caplog.text
+    assert "model=gpt-4.1-mini" in caplog.text
+    assert "input_tokens=10" in caplog.text
+    assert "output_tokens=20" in caplog.text
+    assert "total_tokens=30" in caplog.text
+    assert "cost_estimate_available=True" in caplog.text
+    assert "cost_estimated_usd=0.000036" in caplog.text
+
+
 async def test_reset_starts_fresh_conversation_without_deleting_prior_history(service_bundle) -> None:
     service = service_bundle["service"]
     conversations = service_bundle["conversations"]
@@ -293,6 +317,37 @@ async def test_image_command_generates_photo_and_persists_metadata(service_bundl
     assert stored_images[0].provider == "vertex"
     assert stored_images[0].telegram_file_id == "tg-photo-1"
     assert stored_images[0].model == service.settings.vertex_image_model
+
+
+async def test_image_command_logs_usage_and_cost_estimate(
+    service_bundle,
+    caplog,
+) -> None:
+    service = service_bundle["service"]
+    emitter = FakeResponseEmitter()
+
+    service.settings.vertex_image_model = "imagen-4.0-fast-generate-001"
+    service.settings.vertex_image_cost_per_image_usd = 0.05
+
+    with caplog.at_level("INFO", logger="app.domain.services"):
+        await service.handle_inbound(
+            make_command_message(
+                user_id=42,
+                chat_id=218,
+                command="/image cinematic poster of a fox astronaut",
+                update_id=13,
+            ),
+            responder=emitter,
+        )
+
+    assert "message_processed" in caplog.text
+    assert "provider=vertex" in caplog.text
+    assert "model=imagen-4.0-fast-generate-001" in caplog.text
+    assert "api_method=generate_images" in caplog.text
+    assert "generated_images=1" in caplog.text
+    assert "prompt_chars=" in caplog.text
+    assert "cost_estimate_available=True" in caplog.text
+    assert "cost_estimated_usd=0.05" in caplog.text
 
 
 async def test_image_command_requires_prompt(service_bundle) -> None:
@@ -385,6 +440,33 @@ async def test_video_command_queues_generation_job(service_bundle) -> None:
     assert stored_jobs[0].operation_name == "operations/1"
     assert emitter.sent_texts == [reply.text]
     assert emitter.sent_videos == []
+
+
+async def test_video_command_logs_submission_usage_and_cost_estimate(
+    service_bundle,
+    caplog,
+) -> None:
+    service = service_bundle["service"]
+
+    service.settings.vertex_video_cost_per_second_usd = 0.35
+
+    with caplog.at_level("INFO", logger="app.domain.services"):
+        await service.handle_inbound(
+            make_command_message(
+                user_id=42,
+                chat_id=219,
+                command="/video slow orbit around a crystal sculpture",
+                update_id=14,
+            ),
+        )
+
+    assert "video_generation_requested" in caplog.text
+    assert "provider=vertex" in caplog.text
+    assert "model=veo-3.0-fast-generate-001" in caplog.text
+    assert "duration_seconds=4" in caplog.text
+    assert "prompt_chars=" in caplog.text
+    assert "cost_estimate_available=True" in caplog.text
+    assert "cost_estimated_usd=1.4" in caplog.text
 
 
 async def test_video_command_requires_prompt(service_bundle) -> None:
