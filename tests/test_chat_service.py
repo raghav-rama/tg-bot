@@ -165,6 +165,7 @@ class FakeDraftSession:
 class FakeResponseEmitter:
     def __init__(self, *, draft_session: FakeDraftSession | None = None) -> None:
         self.sent_texts: list[str] = []
+        self.sent_menus = []
         self.sent_photos: list[bytes] = []
         self.sent_videos: list[bytes] = []
         self.draft_session = draft_session or FakeDraftSession()
@@ -188,8 +189,10 @@ class FakeResponseEmitter:
             file_size=4096,
         )
 
-    async def send_text(self, text: str) -> None:
+    async def send_text(self, text: str, settings_menu=None) -> None:
         self.sent_texts.append(text)
+        if settings_menu is not None:
+            self.sent_menus.append(settings_menu)
 
     async def send_photo(self, image) -> SentPhoto:
         self.sent_photos.append(image.image_bytes)
@@ -257,6 +260,45 @@ async def test_history_is_reused_for_follow_up_messages(service_bundle) -> None:
     assert provider.calls[1].history[0].text == "first"
     assert provider.calls[1].history[1].role == "assistant"
     assert provider.calls[1].history[1].text == "assistant reply"
+
+
+async def test_settings_command_returns_settings_menu(service_bundle) -> None:
+    service = service_bundle["service"]
+    provider = service_bundle["provider"]
+    emitter = FakeResponseEmitter()
+
+    reply = await service.handle_inbound(
+        make_command_message(user_id=42, chat_id=100, command="/settings"),
+        responder=emitter,
+    )
+
+    assert "Settings" in reply.text
+    assert reply.settings_menu is not None
+    assert reply.settings_menu.rows[0][0].callback_data == "prefs:menu:video"
+    assert emitter.sent_texts == [reply.text]
+    assert emitter.sent_menus == [reply.settings_menu]
+    assert provider.calls == []
+
+
+async def test_settings_callback_persists_user_preference(service_bundle) -> None:
+    service = service_bundle["service"]
+    preferences = service_bundle["preferences"]
+
+    reply = await service.handle_settings_callback(
+        chat_id=100,
+        user_id=42,
+        callback_data="prefs:video:runpod_ltx_distilled_portrait_4s",
+    )
+    stored = await preferences.get_preference(
+        chat_id=100,
+        user_id=42,
+        preference_type="video",
+    )
+
+    assert stored is not None
+    assert stored.preset_id == "runpod_ltx_distilled_portrait_4s"
+    assert "Video: Runpod LTX distilled portrait 4s" in reply.text
+    assert reply.settings_menu is not None
 
 
 async def test_text_message_logs_token_usage_and_cost_estimate(
@@ -597,6 +639,89 @@ async def test_video_ltx_command_submits_runpod_job(service_bundle) -> None:
     assert stored_jobs[0].provider == "runpod"
     assert stored_jobs[0].model == service.settings.runpod_video_model
     assert stored_jobs[0].prompt_text == "simple cinematic shot of clouds over a valley"
+
+
+async def test_video_command_uses_saved_video_preset(service_bundle) -> None:
+    service = service_bundle["service"]
+    preferences = service_bundle["preferences"]
+    video_generator = service_bundle["video_generator"]
+
+    await preferences.set_preference(
+        chat_id=226,
+        user_id=42,
+        preference_type="video",
+        preset_id="runpod_ltx_distilled_portrait_4s",
+        updated_at=utc_datetime(),
+    )
+
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=226,
+            command="/video foggy mountain reveal",
+            update_id=21,
+        ),
+    )
+
+    request = video_generator.submit_calls[0]
+    assert request.provider_hint == "runpod"
+    assert request.model == "ltx-2.3-22b-distilled-1.1"
+    assert request.width == 576
+    assert request.height == 1024
+    assert request.duration_seconds == 4
+    assert request.frame_rate == 24.0
+
+
+async def test_image_command_uses_saved_image_preset(service_bundle) -> None:
+    service = service_bundle["service"]
+    preferences = service_bundle["preferences"]
+    image_generator = service_bundle["image_generator"]
+    emitter = FakeResponseEmitter()
+
+    await preferences.set_preference(
+        chat_id=227,
+        user_id=42,
+        preference_type="image",
+        preset_id="imagen_landscape_jpeg",
+        updated_at=utc_datetime(),
+    )
+
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=227,
+            command="/image cinematic desert road at sunrise",
+            update_id=22,
+        ),
+        responder=emitter,
+    )
+
+    request = image_generator.calls[0]
+    assert request.model == "imagen-4.0-fast-generate-001"
+    assert request.aspect_ratio == "16:9"
+    assert request.output_mime_type == "image/jpeg"
+
+
+async def test_chat_message_uses_saved_chat_preset(service_bundle) -> None:
+    service = service_bundle["service"]
+    preferences = service_bundle["preferences"]
+    provider = service_bundle["provider"]
+
+    await preferences.set_preference(
+        chat_id=228,
+        user_id=42,
+        preference_type="chat",
+        preset_id="creative_long",
+        updated_at=utc_datetime(),
+    )
+
+    await service.handle_inbound(
+        make_text_message(user_id=42, chat_id=228, text="give me title ideas")
+    )
+
+    request = provider.calls[0]
+    assert request.temperature == 0.8
+    assert request.max_output_tokens == 1200
 
 
 async def test_video_caption_command_passes_reference_image_to_submission(

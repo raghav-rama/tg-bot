@@ -69,16 +69,23 @@ class RunpodVideoProvider:
             if request.duration_seconds is not None
             else self.default_duration_seconds
         )
+        width = request.width if request.width is not None else self.default_width
+        height = request.height if request.height is not None else self.default_height
+        frame_rate = (
+            request.frame_rate
+            if request.frame_rate is not None
+            else self.default_frame_rate
+        )
         input_payload: dict[str, Any] = {
             "prompt": request.prompt,
             "model": model,
-            "width": self.default_width,
-            "height": self.default_height,
+            "width": width,
+            "height": height,
             "num_frames": self._num_frames_for_duration(
                 duration_seconds,
-                self.default_frame_rate,
+                frame_rate,
             ),
-            "frame_rate": self.default_frame_rate,
+            "frame_rate": frame_rate,
         }
         if request.reference_image is not None:
             if request.reference_image.byte_size <= self.reference_image_max_bytes:
@@ -111,10 +118,10 @@ class RunpodVideoProvider:
                 user_id=request.user_id,
                 endpoint_id=self.endpoint_id,
                 model=model,
-                width=self.default_width,
-                height=self.default_height,
+                width=width,
+                height=height,
                 duration_seconds=duration_seconds,
-                frame_rate=self.default_frame_rate,
+                frame_rate=frame_rate,
                 reference_image=bool(request.reference_image),
                 prompt_chars=len(request.prompt),
             )

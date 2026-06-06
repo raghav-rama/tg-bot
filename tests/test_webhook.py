@@ -42,6 +42,7 @@ def test_webhook_route_rejects_invalid_secret(monkeypatch, tmp_path) -> None:
         url: str,
         secret_token: str,
         drop_pending_updates: bool = False,
+        allowed_updates: list[str] | None = None,
     ) -> None:
         self._webhook_configured = True
         self._webhook_url = url
@@ -77,6 +78,7 @@ def test_webhook_route_accepts_valid_secret_and_feeds_update(
         url: str,
         secret_token: str,
         drop_pending_updates: bool = False,
+        allowed_updates: list[str] | None = None,
     ) -> None:
         self._webhook_configured = True
         self._webhook_url = url

@@ -89,7 +89,11 @@ class VideoProviderRouter:
         provider_request = replace(
             request,
             provider_hint=provider_name,
-            model=self.provider_models.get(provider_name, request.model),
+            model=(
+                request.model
+                if request.model_locked
+                else self.provider_models.get(provider_name, request.model)
+            ),
         )
         return await provider.submit_video(provider_request)
 

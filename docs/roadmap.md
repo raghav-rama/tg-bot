@@ -28,6 +28,7 @@ This document separates the current repo state from the planned delivery phases.
   - Phase 4 now includes log-only usage observability, production JSON log formatting, and optional config-driven cost estimates for chat, image, and video generation
   - Phase 4 now supports Telegram photo captions that start with `/image`, `/video`, or `/video_ltx` as reference-image generation commands
   - Phase 4 now has a provider-neutral video router: `/video` tries Vertex first and falls back to Runpod LTX only on classified Vertex safety rejections, while `/video_ltx` forces Runpod for manual testing
+  - Phase 4 now includes `/settings` inline-button presets stored per chat and user for safe video, image, and chat request tuning
 
 ## Current State
 
@@ -42,6 +43,7 @@ As of `2026-06-06`, this repository contains the completed Phase 1 foundation, t
 - `/video <prompt>` now submits one long-running Vertex video job by default, stores it in SQLite, and returns an immediate queued acknowledgement.
 - If Vertex rejects `/video` submission with a classified safety/unsafe error, the video router falls back to Runpod LTX; timeout, quota, and generic upstream failures do not trigger fallback.
 - `/video_ltx <prompt>` submits directly to Runpod LTX and persists the resulting job with `provider="runpod"`.
+- `/settings` lets an allowed user choose whitelisted video, image, and chat presets through Telegram inline buttons; the selections are persisted per `chat_id` and `user_id`.
 - Runpod LTX submission uses native LTX `width`, `height`, `num_frames`, and `frame_rate` controls, and Runpod GCS-backed outputs are downloaded through transient bot-side signed URLs while storing only durable `gs://` output URIs.
 - An in-process polling worker now checks pending video jobs and delivers completed assets through Telegram `sendVideo`.
 - Video job persistence stores operation state, output URIs, failure reasons, and Telegram delivery metadata without persisting raw video bytes in SQLite.
@@ -255,6 +257,7 @@ Current Phase 4 progress:
 - `/image`, `/video`, and `/video_ltx` now accept a Telegram photo-caption reference image without storing raw reference bytes in SQLite
 - `/video` now falls back from Vertex to Runpod only for classified Vertex safety/unsafe rejections
 - `/video_ltx` now forces Runpod LTX and persists queued jobs with the Runpod provider
+- `/settings` now exposes inline-button presets for video, image, and chat request settings while keeping secrets and infrastructure settings environment-only
 
 ## Phase 5 - ElevenLabs Hindi Text To Speech
 

@@ -5,6 +5,7 @@ SUPPORTED_COMMANDS = {
     "/help",
     "/status",
     "/reset",
+    "/settings",
     "/image",
     "/video",
     "/video_ltx",
@@ -62,6 +63,7 @@ def render_start_message() -> str:
         "/help\n"
         "/status\n"
         "/reset\n"
+        "/settings\n"
         "/image <prompt>\n"
         "/video <prompt>\n"
         "/video_ltx <prompt>"
@@ -75,6 +77,7 @@ def render_help_message() -> str:
         "/help - show this help message\n"
         "/status - show runtime status\n"
         "/reset - start a fresh conversation for this chat\n"
+        "/settings - tune video, image, and chat presets\n"
         "/image <prompt> - generate one image with Vertex AI\n"
         "/video <prompt> - queue one short video with Vertex AI and Runpod fallback\n"
         "/video_ltx <prompt> - queue one short video directly with Runpod LTX\n\n"

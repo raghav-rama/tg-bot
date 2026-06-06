@@ -16,6 +16,7 @@ Implemented today:
 - `/image <prompt>` generation through Vertex AI and Telegram `sendPhoto`
 - `/video <prompt>` queued generation through Vertex AI with Runpod LTX fallback on Vertex safety rejections
 - `/video_ltx <prompt>` queued generation directly through Runpod LTX for manual testing
+- `/settings` inline-button presets for per-chat/per-user video, image, and chat request settings
 - SQLite-backed video jobs, background polling, and Telegram `sendVideo`
 - photo captions that start with `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>` use the photo as a transient reference image for generation
 - log-only usage observability with production JSON logs, local text logs by default, and optional config-driven cost estimates for chat, image, and video generation
@@ -38,7 +39,7 @@ Inbound inputs:
 - plain text messages
 - one photo with an optional caption
 - one photo with a caption that starts with `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>`
-- commands: `/start`, `/help`, `/status`, `/reset`, `/image`, `/video`, `/video_ltx`
+- commands: `/start`, `/help`, `/status`, `/reset`, `/settings`, `/image`, `/video`, `/video_ltx`
 
 Outbound outputs:
 
@@ -68,7 +69,7 @@ The runtime is split so Telegram transport stays separate from domain and provid
 - `app/telegram/`: polling runtime, handlers, normalization, formatting, media delivery, and drafts
 - `app/domain/`: commands, models, interfaces, and orchestration in `ChatService`
 - `app/providers/`: OpenAI chat plus Vertex image/video, Runpod video, and video provider routing adapters
-- `app/storage/`: SQLite schema and repositories for conversations, messages, generated images, and generation jobs
+- `app/storage/`: SQLite schema and repositories for conversations, messages, generated images, generation jobs, and user preferences
 - `app/workers/`: background polling worker for queued video jobs
 
 ## Requirements
@@ -303,6 +304,7 @@ docker run --rm \
 - `/help`: list supported commands and message types
 - `/status`: show update mode, configured models, and memory status
 - `/reset`: archive the current conversation and start a fresh one
+- `/settings`: choose per-chat/per-user video, image, and chat presets with inline buttons
 - `/image <prompt>`: generate one image through Vertex AI
 - `/video <prompt>`: queue one short video through Vertex AI, with Runpod fallback only on Vertex safety rejections
 - `/video_ltx <prompt>`: queue one short video directly through Runpod LTX
@@ -313,6 +315,14 @@ Reference-image commands:
 - send one photo with caption `/video <prompt>` to queue an image-to-video job using that photo as the first-frame reference
 - send one photo with caption `/video_ltx <prompt>` to queue a Runpod LTX image-to-video job using that photo as the reference image
 - send one photo with any other caption to keep using the normal OpenAI image-understanding path
+
+Settings presets:
+
+- `/settings` stores preferences per `chat_id` and `user_id`; missing preferences use the environment defaults
+- video presets can choose provider/model strategy, Runpod dimensions, duration, and frame rate
+- image presets can choose the image model, aspect ratio, and output MIME type
+- chat presets can choose creativity, response length, and memory depth
+- secrets, endpoint IDs, storage paths, and infrastructure timeouts remain environment-only
 
 ## Testing
 

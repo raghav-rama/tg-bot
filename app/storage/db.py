@@ -105,6 +105,16 @@ SCHEMA_STATEMENTS = (
     CREATE INDEX IF NOT EXISTS idx_generation_jobs_status_created
     ON generation_jobs(status, created_at)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS user_preferences (
+        chat_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        preference_type TEXT NOT NULL,
+        preset_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (chat_id, user_id, preference_type)
+    )
+    """,
 )
 
 

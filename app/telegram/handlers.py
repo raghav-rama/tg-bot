@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Bot, Router
-from aiogram.types import Message, Update
+from aiogram import Bot, F, Router
+from aiogram.types import CallbackQuery, Message, Update
 
 from app.config import Settings
+from app.domain.preferences import SETTINGS_UPDATED_TEXT, parse_settings_callback
 from app.domain.services import ChatService
 from app.logging import log_kv
-from app.telegram.drafts import TelegramResponseEmitter
+from app.telegram.drafts import TelegramResponseEmitter, _settings_menu_markup
 from app.telegram.media import download_largest_photo_bytes
 from app.telegram.normalizer import normalize_message
 
@@ -65,6 +66,42 @@ class TelegramUpdateProcessor:
                 )
             )
 
+    async def process_callback(
+        self,
+        *,
+        callback: CallbackQuery,
+        update_id: int,
+    ) -> None:
+        callback_message = callback.message
+        if callback.from_user is None or callback_message is None:
+            await callback.answer(text="Unsupported settings action.", show_alert=True)
+            return
+        chat = getattr(callback_message, "chat", None)
+        if chat is None:
+            await callback.answer(text="Unsupported settings action.", show_alert=True)
+            return
+
+        reply = await self.chat_service.handle_settings_callback(
+            chat_id=chat.id,
+            user_id=callback.from_user.id,
+            callback_data=callback.data,
+        )
+        parsed = parse_settings_callback(callback.data)
+        if reply.error_type is not None:
+            await callback.answer(text=reply.text, show_alert=True)
+            return
+        elif parsed is not None and parsed[0] == "set":
+            await callback.answer(text=SETTINGS_UPDATED_TEXT)
+        else:
+            await callback.answer()
+
+        edit_text = getattr(callback_message, "edit_text", None)
+        if reply.text and edit_text is not None:
+            await edit_text(
+                text=reply.text,
+                reply_markup=_settings_menu_markup(reply.settings_menu),
+            )
+
 
 def build_router(processor: TelegramUpdateProcessor) -> Router:
     router = Router()
@@ -78,6 +115,16 @@ def build_router(processor: TelegramUpdateProcessor) -> Router:
         await processor.process_message(
             message=message,
             bot=bot,
+            update_id=event_update.update_id,
+        )
+
+    @router.callback_query(F.data.startswith("prefs:"))
+    async def on_settings_callback(
+        callback: CallbackQuery,
+        event_update: Update,
+    ) -> None:
+        await processor.process_callback(
+            callback=callback,
             update_id=event_update.update_id,
         )
 

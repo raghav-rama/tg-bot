@@ -23,9 +23,10 @@ from app.storage.db import Database
 from app.storage.generation_jobs import GenerationJobRepository
 from app.storage.generated_images import GeneratedImageRepository
 from app.storage.messages import MessageRepository
+from app.storage.preferences import PreferenceRepository
 from app.telegram.drafts import TelegramResponseEmitter
 from app.telegram.handlers import TelegramUpdateProcessor
-from app.telegram.polling import TelegramRuntime
+from app.telegram.polling import ALLOWED_UPDATES, TelegramRuntime
 from app.workers.video_jobs import VideoJobWorker
 
 
@@ -72,6 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             messages = MessageRepository(database)
             generated_images = GeneratedImageRepository(database)
             generation_jobs = GenerationJobRepository(database)
+            preferences = PreferenceRepository(database)
             container.conversations = conversations
             container.messages = messages
             container.generated_images = generated_images
@@ -158,6 +160,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 image_generator=image_generator,
                 generation_jobs=generation_jobs,
                 video_generator=video_generator,
+                preferences=preferences,
             )
             container.chat_service = chat_service
             processor = TelegramUpdateProcessor(
@@ -182,6 +185,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     drop_pending_updates=(
                         loaded_settings.telegram_webhook_drop_pending_updates
                     ),
+                    allowed_updates=ALLOWED_UPDATES,
                 )
             video_job_worker = None
             if video_generator is not None:

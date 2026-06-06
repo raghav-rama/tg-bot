@@ -22,6 +22,7 @@ from app.storage.db import Database
 from app.storage.generation_jobs import GenerationJobRepository
 from app.storage.generated_images import GeneratedImageRepository
 from app.storage.messages import MessageRepository
+from app.storage.preferences import PreferenceRepository
 
 
 class FakeProvider:
@@ -183,6 +184,7 @@ async def service_bundle(tmp_path):
     messages = MessageRepository(database)
     generated_images = GeneratedImageRepository(database)
     generation_jobs = GenerationJobRepository(database)
+    preferences = PreferenceRepository(database)
     provider = FakeProvider()
     image_generator = FakeImageGenerator()
     video_generator = FakeVideoGenerator()
@@ -195,6 +197,7 @@ async def service_bundle(tmp_path):
         image_generator=image_generator,
         generation_jobs=generation_jobs,
         video_generator=video_generator,
+        preferences=preferences,
     )
 
     yield {
@@ -204,6 +207,7 @@ async def service_bundle(tmp_path):
         "messages": messages,
         "generated_images": generated_images,
         "generation_jobs": generation_jobs,
+        "preferences": preferences,
         "provider": provider,
         "image_generator": image_generator,
         "video_generator": video_generator,
