@@ -297,7 +297,7 @@ async def test_settings_callback_persists_user_preference(service_bundle) -> Non
 
     assert stored is not None
     assert stored.preset_id == "runpod"
-    assert "Video provider: Runpod LTX" in reply.text
+    assert "Video provider: 🚀 Runpod LTX" in reply.text
     assert reply.settings_menu is not None
 
 

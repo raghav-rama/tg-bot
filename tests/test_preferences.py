@@ -61,6 +61,7 @@ async def test_preference_repository_upserts_per_chat_user(service_bundle) -> No
 
 
 def test_settings_menu_uses_compact_callback_data() -> None:
+    main_menu = settings_menu_for()
     menu = settings_menu_for(preference_type="video")
     duration_menu = settings_menu_for(
         preference_type="video_duration",
@@ -82,11 +83,27 @@ def test_settings_menu_uses_compact_callback_data() -> None:
     assert "prefs:menu:video_duration" in video_menu_callback_data
     assert "prefs:menu:runpod_reference_strength" in video_menu_callback_data
     assert "prefs:video_duration:duration_6s" in duration_callback_data
+    assert [button.text for button in main_menu.rows[0]] == [
+        "🎬 Video",
+        "🖼️ Image",
+        "💬 Chat",
+    ]
+    assert [row[0].text for row in menu.rows] == [
+        "🧭 Provider",
+        "⏱️ Duration",
+        "📐 Aspect ratio",
+        "🧬 Runpod pipeline",
+        "🎚️ Runpod quality",
+        "🎲 Runpod seed",
+        "🖼️ Reference strength",
+        "↩️ Back",
+    ]
     assert any(
-        button.text.startswith("[x] 6s")
+        button.text.startswith("✅ ⏱️ 6s")
         for row in duration_menu.rows
         for button in row
     )
+    assert all("[x]" not in button.text for row in duration_menu.rows for button in row)
     assert all(
         len(value.encode("utf-8")) <= 64
         for value in video_menu_callback_data + duration_callback_data
@@ -112,6 +129,39 @@ def test_presets_map_to_request_overrides() -> None:
     assert image_preset.model == "imagen-4.0-fast-generate-001"
     assert image_preset.aspect_ratio == "16:9"
     assert image_preset.output_mime_type == "image/jpeg"
+
+
+def test_image_settings_menu_has_clear_gemini_portrait_option() -> None:
+    menu = settings_menu_for(preference_type="image")
+    labels = [button.text for row in menu.rows for button in row]
+    gemini_portrait = image_preset_for("gemini_portrait_jpeg")
+
+    assert "✨ Gemini square JPEG" in labels
+    assert "📱 Gemini portrait JPEG" in labels
+    assert all("reference" not in label.lower() for label in labels)
+    assert gemini_portrait is not None
+    assert gemini_portrait.model == "gemini-3-pro-image-preview"
+    assert gemini_portrait.aspect_ratio == "9:16"
+    assert gemini_portrait.output_mime_type == "image/jpeg"
+
+
+def test_settings_presets_use_emoji_labels() -> None:
+    menu_types = (
+        "video_provider",
+        "video_duration",
+        "video_orientation",
+        "runpod_pipeline",
+        "runpod_quality",
+        "runpod_seed",
+        "runpod_reference_strength",
+        "image",
+        "chat",
+    )
+
+    for menu_type in menu_types:
+        labels = [button.text for row in settings_menu_for(preference_type=menu_type).rows for button in row]
+        assert labels[-1] == "↩️ Back"
+        assert all(ord(label[0]) > 127 for label in labels)
 
 
 def test_active_settings_summary_names_defaults_and_saved_presets() -> None:
@@ -148,8 +198,8 @@ def test_active_settings_summary_names_defaults_and_saved_presets() -> None:
         }
     )
 
-    assert "Video provider: Runpod LTX" in summary
-    assert "Video duration: 8s" in summary
-    assert "Runpod pipeline: Two-stage" in summary
+    assert "Video provider: 🚀 Runpod LTX" in summary
+    assert "Video duration: ⏱️ 8s" in summary
+    assert "Runpod pipeline: 🎞️ Two-stage" in summary
     assert "Image: Environment default" in summary
     assert "Chat: Environment default" in summary

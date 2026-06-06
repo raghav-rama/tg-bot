@@ -92,17 +92,17 @@ class ChatPreset:
 VIDEO_PROVIDER_PRESETS: dict[str, VideoProviderPreset] = {
     "auto": VideoProviderPreset(
         id="auto",
-        label="Environment default",
+        label="🌐 Environment default",
         provider_hint="auto",
     ),
     "vertex": VideoProviderPreset(
         id="vertex",
-        label="Vertex Veo",
+        label="🎥 Vertex Veo",
         provider_hint="vertex",
     ),
     "runpod": VideoProviderPreset(
         id="runpod",
-        label="Runpod LTX",
+        label="🚀 Runpod LTX",
         provider_hint="runpod",
     ),
 }
@@ -110,22 +110,22 @@ VIDEO_PROVIDER_PRESETS: dict[str, VideoProviderPreset] = {
 VIDEO_DURATION_PRESETS: dict[str, VideoDurationPreset] = {
     "duration_4s": VideoDurationPreset(
         id="duration_4s",
-        label="4s",
+        label="⏱️ 4s",
         duration_seconds=4,
     ),
     "duration_5s": VideoDurationPreset(
         id="duration_5s",
-        label="5s",
+        label="⏱️ 5s",
         duration_seconds=5,
     ),
     "duration_6s": VideoDurationPreset(
         id="duration_6s",
-        label="6s",
+        label="⏱️ 6s",
         duration_seconds=6,
     ),
     "duration_8s": VideoDurationPreset(
         id="duration_8s",
-        label="8s",
+        label="⏱️ 8s",
         duration_seconds=8,
     ),
 }
@@ -133,21 +133,21 @@ VIDEO_DURATION_PRESETS: dict[str, VideoDurationPreset] = {
 VIDEO_ORIENTATION_PRESETS: dict[str, VideoOrientationPreset] = {
     "portrait_9_16": VideoOrientationPreset(
         id="portrait_9_16",
-        label="Portrait 9:16",
+        label="📱 Portrait 9:16",
         vertex_aspect_ratio="9:16",
         runpod_width=576,
         runpod_height=1024,
     ),
     "landscape_16_9": VideoOrientationPreset(
         id="landscape_16_9",
-        label="Landscape 16:9",
+        label="🌄 Landscape 16:9",
         vertex_aspect_ratio="16:9",
         runpod_width=1024,
         runpod_height=576,
     ),
     "square_1_1": VideoOrientationPreset(
         id="square_1_1",
-        label="Square 1:1",
+        label="◼️ Square 1:1",
         vertex_aspect_ratio="1:1",
         runpod_width=768,
         runpod_height=768,
@@ -157,13 +157,13 @@ VIDEO_ORIENTATION_PRESETS: dict[str, VideoOrientationPreset] = {
 RUNPOD_PIPELINE_PRESETS: dict[str, RunpodPipelinePreset] = {
     "distilled": RunpodPipelinePreset(
         id="distilled",
-        label="Distilled",
+        label="⚡ Distilled",
         pipeline="distilled",
         model="ltx-2.3-22b-distilled-1.1",
     ),
     "two_stage": RunpodPipelinePreset(
         id="two_stage",
-        label="Two-stage",
+        label="🎞️ Two-stage",
         pipeline="two_stage",
         model="ltx-2.3-22b",
     ),
@@ -172,17 +172,17 @@ RUNPOD_PIPELINE_PRESETS: dict[str, RunpodPipelinePreset] = {
 RUNPOD_QUALITY_PRESETS: dict[str, RunpodQualityPreset] = {
     "fast": RunpodQualityPreset(
         id="fast",
-        label="Fast quality",
+        label="🏃 Fast quality",
         num_inference_steps=30,
     ),
     "default": RunpodQualityPreset(
         id="default",
-        label="Default quality",
+        label="⚙️ Default quality",
         num_inference_steps=40,
     ),
     "high": RunpodQualityPreset(
         id="high",
-        label="High quality",
+        label="💎 High quality",
         num_inference_steps=50,
     ),
 }
@@ -190,12 +190,12 @@ RUNPOD_QUALITY_PRESETS: dict[str, RunpodQualityPreset] = {
 RUNPOD_SEED_PRESETS: dict[str, RunpodSeedPreset] = {
     "fixed": RunpodSeedPreset(
         id="fixed",
-        label="Fixed seed",
+        label="📌 Fixed seed",
         seed=10,
     ),
     "random": RunpodSeedPreset(
         id="random",
-        label="Random seed",
+        label="🎲 Random seed",
         randomize=True,
     ),
 }
@@ -203,17 +203,17 @@ RUNPOD_SEED_PRESETS: dict[str, RunpodSeedPreset] = {
 RUNPOD_REFERENCE_STRENGTH_PRESETS: dict[str, RunpodReferenceStrengthPreset] = {
     "low": RunpodReferenceStrengthPreset(
         id="low",
-        label="Low reference strength",
+        label="🌗 Low reference strength",
         image_strength=0.6,
     ),
     "medium": RunpodReferenceStrengthPreset(
         id="medium",
-        label="Medium reference strength",
+        label="🌓 Medium reference strength",
         image_strength=0.8,
     ),
     "high": RunpodReferenceStrengthPreset(
         id="high",
-        label="High reference strength",
+        label="🌕 High reference strength",
         image_strength=0.9,
     ),
 }
@@ -221,23 +221,30 @@ RUNPOD_REFERENCE_STRENGTH_PRESETS: dict[str, RunpodReferenceStrengthPreset] = {
 IMAGE_PRESETS: dict[str, ImagePreset] = {
     "imagen_square_jpeg": ImagePreset(
         id="imagen_square_jpeg",
-        label="Imagen square JPEG",
+        label="🖼️ Imagen square JPEG",
         model="imagen-4.0-fast-generate-001",
         aspect_ratio="1:1",
         output_mime_type="image/jpeg",
     ),
     "imagen_landscape_jpeg": ImagePreset(
         id="imagen_landscape_jpeg",
-        label="Imagen landscape JPEG",
+        label="🌄 Imagen landscape JPEG",
         model="imagen-4.0-fast-generate-001",
         aspect_ratio="16:9",
         output_mime_type="image/jpeg",
     ),
     "gemini_reference_square_jpeg": ImagePreset(
         id="gemini_reference_square_jpeg",
-        label="Gemini reference square JPEG",
+        label="✨ Gemini square JPEG",
         model="gemini-3-pro-image-preview",
         aspect_ratio="1:1",
+        output_mime_type="image/jpeg",
+    ),
+    "gemini_portrait_jpeg": ImagePreset(
+        id="gemini_portrait_jpeg",
+        label="📱 Gemini portrait JPEG",
+        model="gemini-3-pro-image-preview",
+        aspect_ratio="9:16",
         output_mime_type="image/jpeg",
     ),
 }
@@ -245,28 +252,28 @@ IMAGE_PRESETS: dict[str, ImagePreset] = {
 CHAT_PRESETS: dict[str, ChatPreset] = {
     "precise_short": ChatPreset(
         id="precise_short",
-        label="Precise short",
+        label="🎯 Precise short",
         temperature=0.1,
         max_output_tokens=350,
         history_max_turns=10,
     ),
     "balanced_medium": ChatPreset(
         id="balanced_medium",
-        label="Balanced medium",
+        label="⚖️ Balanced medium",
         temperature=0.3,
         max_output_tokens=700,
         history_max_turns=20,
     ),
     "creative_long": ChatPreset(
         id="creative_long",
-        label="Creative long",
+        label="🎨 Creative long",
         temperature=0.8,
         max_output_tokens=1200,
         history_max_turns=30,
     ),
     "no_memory": ChatPreset(
         id="no_memory",
-        label="No memory",
+        label="🧹 No memory",
         temperature=0.2,
         max_output_tokens=500,
         history_max_turns=0,
@@ -342,9 +349,9 @@ def settings_menu_for(
         return SettingsMenu(
             rows=(
                 (
-                    SettingsButton("Video", "prefs:menu:video"),
-                    SettingsButton("Image", "prefs:menu:image"),
-                    SettingsButton("Chat", "prefs:menu:chat"),
+                    SettingsButton("🎬 Video", "prefs:menu:video"),
+                    SettingsButton("🖼️ Image", "prefs:menu:image"),
+                    SettingsButton("💬 Chat", "prefs:menu:chat"),
                 ),
             )
         )
@@ -352,26 +359,26 @@ def settings_menu_for(
     if preference_type == "video":
         return SettingsMenu(
             rows=(
-                (SettingsButton("Provider", "prefs:menu:video_provider"),),
-                (SettingsButton("Duration", "prefs:menu:video_duration"),),
-                (SettingsButton("Aspect ratio", "prefs:menu:video_orientation"),),
-                (SettingsButton("Runpod pipeline", "prefs:menu:runpod_pipeline"),),
-                (SettingsButton("Runpod quality", "prefs:menu:runpod_quality"),),
-                (SettingsButton("Runpod seed", "prefs:menu:runpod_seed"),),
+                (SettingsButton("🧭 Provider", "prefs:menu:video_provider"),),
+                (SettingsButton("⏱️ Duration", "prefs:menu:video_duration"),),
+                (SettingsButton("📐 Aspect ratio", "prefs:menu:video_orientation"),),
+                (SettingsButton("🧬 Runpod pipeline", "prefs:menu:runpod_pipeline"),),
+                (SettingsButton("🎚️ Runpod quality", "prefs:menu:runpod_quality"),),
+                (SettingsButton("🎲 Runpod seed", "prefs:menu:runpod_seed"),),
                 (
                     SettingsButton(
-                        "Reference strength",
+                        "🖼️ Reference strength",
                         "prefs:menu:runpod_reference_strength",
                     ),
                 ),
-                (SettingsButton("Back", "prefs:menu:main"),),
+                (SettingsButton("↩️ Back", "prefs:menu:main"),),
             )
         )
 
     preset_map = _preset_map_for(preference_type)
     rows: list[tuple[SettingsButton, ...]] = []
     for preset_id, preset in preset_map.items():
-        marker = "[x] " if preset_id == active_preset_id else ""
+        marker = "✅ " if preset_id == active_preset_id else ""
         rows.append(
             (
                 SettingsButton(
@@ -385,7 +392,7 @@ def settings_menu_for(
         if preference_type.startswith(("video_", "runpod_"))
         else "prefs:menu:main"
     )
-    rows.append((SettingsButton("Back", back_callback_data),))
+    rows.append((SettingsButton("↩️ Back", back_callback_data),))
     return SettingsMenu(rows=tuple(rows))
 
 
