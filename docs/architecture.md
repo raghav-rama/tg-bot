@@ -447,7 +447,10 @@ User-facing behavior:
 
 ## Logging and Observability
 
-Use structured logs with these fields when available:
+Use structured logs with these fields when available. Local development defaults to
+readable text logs, and production deployments should set `APP_LOG_FORMAT=json` so
+each emitted line is a parseable JSON object with `timestamp`, `level`, `logger`,
+`event`, and the event fields.
 
 - `update_id`
 - `chat_id`
@@ -461,6 +464,11 @@ Use structured logs with these fields when available:
 - `error_type`
 
 Do not log raw image bytes or API keys. User text should only be logged at debug level, and image captions should follow the same rule.
+
+Successful low-level `httpx` and `httpcore` request logs should stay below
+`WARNING`. Long-running video poll loops should keep repeated "still running" state
+at `DEBUG` while queueing, completion, delivery, and failure events remain visible
+at `INFO` or `WARNING`.
 
 ## Security Notes
 

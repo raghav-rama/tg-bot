@@ -77,7 +77,7 @@ class VideoJobWorker:
             await asyncio.sleep(self.settings.video_job_poll_interval_seconds)
 
     async def _process_job(self, job: StoredGenerationJob) -> None:
-        self.logger.info(
+        self.logger.debug(
             log_kv(
                 "video_job_processing_started",
                 job_id=job.id,

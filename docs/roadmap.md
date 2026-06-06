@@ -15,7 +15,7 @@ This document separates the current repo state from the planned delivery phases.
 
 - Active phase: `Phase 4 - Hardening And Expansion`
 - Status: `in_progress`
-- Last updated: `2026-05-15`
+- Last updated: `2026-06-06`
 - Previous phase accepted: `Phase 3 - Vertex Video Generation`
 - Evidence:
   - Phase 1 foundation work is accepted as complete for repo sequencing
@@ -25,13 +25,13 @@ This document separates the current repo state from the planned delivery phases.
   - video generation now uses persisted `generation_jobs` rows plus a background polling worker instead of blocking the original request path
   - completed video jobs now deliver through Telegram `sendVideo`
   - video asset retention rules are now explicit: inline bytes stay transient in memory, while URI-backed outputs rely on external bucket lifecycle policy
-  - Phase 4 now includes log-only usage observability and optional config-driven cost estimates for chat, image, and video generation
+  - Phase 4 now includes log-only usage observability, production JSON log formatting, and optional config-driven cost estimates for chat, image, and video generation
   - Phase 4 now supports Telegram photo captions that start with `/image`, `/video`, or `/video_ltx` as reference-image generation commands
   - Phase 4 now has a provider-neutral video router: `/video` tries Vertex first and falls back to Runpod LTX only on classified Vertex safety rejections, while `/video_ltx` forces Runpod for manual testing
 
 ## Current State
 
-As of `2026-05-15`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, the completed Phase 3 video-generation slice, and active Phase 4 hardening work.
+As of `2026-06-06`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, the completed Phase 3 video-generation slice, and active Phase 4 hardening work.
 
 - Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, OpenAI chat, Vertex image plus video generation, and Runpod LTX video fallback.
 - A polling-first runtime exists, and webhook mode now reuses the same shared processing path when enabled.
@@ -50,6 +50,7 @@ As of `2026-05-15`, this repository contains the completed Phase 1 foundation, t
 - Inline generated video bytes remain transient in memory only, while URI-backed assets are expected to live in a bucket with lifecycle cleanup managed outside the app.
 - Phase 4 has started with a real webhook deployment path: webhook mode now registers the Telegram webhook on startup, validates the `X-Telegram-Bot-Api-Secret-Token` header on inbound requests, and reports webhook setup state through readiness.
 - Phase 4 now logs usage units and optional best-effort cost estimates for OpenAI chat, Vertex image generation, Vertex/Runpod video submission, and completed video delivery without adding a metrics backend or billing reconciliation.
+- Phase 4 now supports `APP_LOG_FORMAT=json` for production structured logs, keeps readable text logs as the local default, suppresses successful low-level HTTP client logs below `WARNING`, and keeps repeated still-running video poll state at `DEBUG`.
 - Photo captions that start with `/image <prompt>` use the photo as a transient reference image for Gemini image generation; Imagen remains prompt-to-image only.
 - Photo captions that start with `/video <prompt>` queue an image-to-video job using the photo as a transient reference image.
 - Photo captions that start with `/video_ltx <prompt>` queue a Runpod LTX image-to-video job using the photo as a transient reference image when it is under the configured Runpod reference-image size cap.
@@ -248,6 +249,8 @@ Current Phase 4 progress:
 - webhook mode now requires and validates a Telegram secret token header
 - readiness now treats missing webhook setup as not ready
 - chat, `/image`, `/video`, and completed video delivery now emit structured usage fields through the existing `log_kv(...)` log path
+- production can set `APP_LOG_FORMAT=json` to emit those fields as parseable JSON instead of local text
+- repeated still-running video polling and successful low-level HTTP client logs no longer dominate INFO-level production logs
 - cost estimates are optional, configuration-driven, and disabled by default so pricing can be updated without code changes
 - `/image`, `/video`, and `/video_ltx` now accept a Telegram photo-caption reference image without storing raw reference bytes in SQLite
 - `/video` now falls back from Vertex to Runpod only for classified Vertex safety/unsafe rejections

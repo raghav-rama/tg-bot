@@ -7,6 +7,7 @@ from app.config import Settings
 
 
 _REPO_ENV_KEYS = (
+    "APP_LOG_FORMAT",
     "BOT_DRAFT_START_DELAY_MS",
     "BOT_DRAFT_UPDATE_INTERVAL_MS",
     "BOT_DRAFT_MIN_CHARS_DELTA",
@@ -73,6 +74,7 @@ def test_draft_streaming_defaults_are_conservative(tmp_path, monkeypatch) -> Non
     assert settings.bot_draft_start_delay_ms == 750
     assert settings.bot_draft_update_interval_ms == 1200
     assert settings.bot_draft_min_chars_delta == 80
+    assert settings.app_log_format == "text"
     assert settings.telegram_webhook_drop_pending_updates is False
     assert settings.vertex_project_id is None
     assert settings.vertex_location == "us-central1"
@@ -127,6 +129,39 @@ def test_cost_estimate_rates_can_be_configured(tmp_path, monkeypatch) -> None:
     assert settings.vertex_image_cost_per_image_usd == 0.05
     assert settings.vertex_video_cost_per_second_usd == 0.35
     assert settings.runpod_video_cost_per_second_usd == 0.12
+
+
+def test_app_log_format_accepts_json(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        APP_LOG_FORMAT="json",
+    )
+
+    assert settings.app_log_format == "json"
+
+
+def test_app_log_format_rejects_unknown_values(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    with pytest.raises(ValidationError, match="APP_LOG_FORMAT must be 'text' or 'json'"):
+        Settings(
+            _env_file=None,
+            TELEGRAM_BOT_TOKEN="test-token",
+            OPENAI_API_KEY="test-key",
+            TELEGRAM_ALLOWED_USER_IDS="42",
+            APP_UPDATE_MODE="webhook",
+            TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+            TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+            SQLITE_PATH=str(tmp_path / "bot.db"),
+            APP_LOG_FORMAT="pretty",
+        )
 
 
 def test_vertex_api_key_also_enables_image_generation(tmp_path, monkeypatch) -> None:

@@ -24,7 +24,7 @@ The current repo plan is active Phase 4 Hardening and Expansion.
 
 ## Current State
 
-As of `2026-05-15`, the repository is no longer docs-only. Phase 1, Phase 1.5, Phase 2, and Phase 3 are accepted as complete, and the roadmap is in Phase 4 hardening and expansion.
+As of `2026-06-06`, the repository is no longer docs-only. Phase 1, Phase 1.5, Phase 2, and Phase 3 are accepted as complete, and the roadmap is in Phase 4 hardening and expansion.
 
 - Phase 1 foundation code exists under `app/`.
 - Project metadata and dependency definitions exist in `pyproject.toml` and `uv.lock`.
@@ -41,6 +41,7 @@ As of `2026-05-15`, the repository is no longer docs-only. Phase 1, Phase 1.5, P
 - Telegram video delivery now uses a configurable request timeout and logs concrete delivery exceptions for easier debugging of slow or ambiguous uploads.
 - Phase 4 hardening has now started with a real webhook deployment path: webhook mode registers the Telegram webhook during startup, validates `X-Telegram-Bot-Api-Secret-Token`, and reports webhook misconfiguration through readiness.
 - Phase 4 now includes log-only observability for chat, `/image`, `/video`, `/video_ltx`, and video job delivery, with optional config-driven cost estimates that default to disabled.
+- Production logs can now use `APP_LOG_FORMAT=json` for parseable structured fields, while local logs default to readable text. Repeated still-running video poll state and successful low-level HTTP client requests no longer dominate INFO-level logs.
 - Phase 4 now supports reference-image generation from Telegram photo captions: `/image <prompt>` uses Gemini image models only, while `/video <prompt>` and `/video_ltx <prompt>` queue image-to-video jobs.
 - Generated video bytes remain transient in memory only; when URI-backed assets are used, cleanup is expected to come from the configured bucket or object-storage lifecycle policy outside the app.
 - Automated tests exist under `tests/` for health/readiness behavior, Telegram normalization, allowlist handling, history reuse, reset semantics, draft streaming, draft fallback, explicit draft rate-limit fallback, provider cleanup, supersession, image generation, video job handling, observability/cost-estimate helpers, Vertex provider flows, Runpod provider flows, and video provider routing.

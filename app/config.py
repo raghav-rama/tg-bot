@@ -32,6 +32,7 @@ class Settings(BaseSettings):
 
     app_env: str = Field(default="development", alias="APP_ENV")
     app_log_level: str = Field(default="INFO", alias="APP_LOG_LEVEL")
+    app_log_format: str = Field(default="text", alias="APP_LOG_FORMAT")
     app_update_mode: str = Field(default="polling", alias="APP_UPDATE_MODE")
     telegram_webhook_url: str | None = Field(
         default=None,
@@ -204,6 +205,14 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_log_level(cls, value: str) -> str:
         return value.strip().upper()
+
+    @field_validator("app_log_format")
+    @classmethod
+    def validate_log_format(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"text", "json"}:
+            raise ValueError("APP_LOG_FORMAT must be 'text' or 'json'")
+        return normalized
 
     @field_validator("telegram_allowed_user_ids")
     @classmethod

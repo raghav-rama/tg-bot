@@ -18,7 +18,7 @@ Implemented today:
 - `/video_ltx <prompt>` queued generation directly through Runpod LTX for manual testing
 - SQLite-backed video jobs, background polling, and Telegram `sendVideo`
 - photo captions that start with `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>` use the photo as a transient reference image for generation
-- log-only usage observability with optional config-driven cost estimates for chat, image, and video generation
+- log-only usage observability with production JSON logs, local text logs by default, and optional config-driven cost estimates for chat, image, and video generation
 - health and readiness endpoints plus automated tests
 
 Local planning docs remain the source of truth for scope and sequencing:
@@ -98,6 +98,8 @@ TELEGRAM_ALLOWED_USER_IDS=123456789
 # Optional app settings
 APP_UPDATE_MODE=polling
 APP_LOG_LEVEL=INFO
+# Use APP_LOG_FORMAT=json in production log viewers.
+APP_LOG_FORMAT=text
 SQLITE_PATH=./data/bot.db
 # Required when APP_UPDATE_MODE=webhook
 # TELEGRAM_WEBHOOK_URL=https://bot.example.com/telegram/webhook
@@ -166,6 +168,7 @@ Core settings:
 - `TELEGRAM_WEBHOOK_SECRET_TOKEN`: required when webhook mode is enabled
 - `TELEGRAM_WEBHOOK_DROP_PENDING_UPDATES`: default `false`
 - `APP_LOG_LEVEL`: default `INFO`
+- `APP_LOG_FORMAT`: `text` or `json`, default `text`; set `json` in production for parseable structured fields
 - `SQLITE_PATH`: default `./data/bot.db`
 
 Chat settings:
@@ -246,6 +249,9 @@ Runpod worker contract:
 Observability notes:
 
 - usage and cost estimate fields are emitted through normal application logs
+- local logs default to readable text; production can set `APP_LOG_FORMAT=json` for one JSON object per line
+- successful low-level `httpx` and `httpcore` request logs are suppressed below `WARNING`
+- repeated video-job polling for still-running jobs is logged at `DEBUG`, while queueing, completion, delivery, and failure events stay visible at `INFO` or `WARNING`
 - cost estimates are disabled by default and are not billing reconciliation
 - keep the estimate rates current in configuration when provider pricing changes
 

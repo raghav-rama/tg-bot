@@ -53,12 +53,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         container = AppContainer()
         app.state.container = container
-        configure_logging("INFO")
+        configure_logging("INFO", log_format="text")
 
         try:
             loaded_settings = settings or Settings()
             container.settings = loaded_settings
-            configure_logging(loaded_settings.app_log_level)
+            configure_logging(
+                loaded_settings.app_log_level,
+                log_format=loaded_settings.app_log_format,
+            )
 
             database = Database(loaded_settings.sqlite_path)
             container.database = database
@@ -228,6 +231,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     video_provider_order=",".join(loaded_settings.video_provider_order),
                     video_output_gcs_uri=loaded_settings.vertex_video_output_gcs_uri,
                     video_poll_interval_seconds=loaded_settings.video_job_poll_interval_seconds,
+                    log_format=loaded_settings.app_log_format,
                 )
             )
         except SettingsValidationError as exc:
