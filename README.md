@@ -300,6 +300,15 @@ docker run --rm \
   tg-bot
 ```
 
+The container entrypoint prepares the parent directory of `SQLITE_PATH` at runtime,
+then drops privileges to the `app` user before starting Uvicorn. This matters for
+Railway volumes because the mounted filesystem appears after the image is built.
+For a Railway volume mounted at `/app/volume`, set:
+
+```dotenv
+SQLITE_PATH=/app/volume/data/bot.db
+```
+
 ## Bot Commands
 
 - `/start`: show the bot overview
