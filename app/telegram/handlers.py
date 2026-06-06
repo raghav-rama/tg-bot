@@ -33,13 +33,20 @@ class TelegramUpdateProcessor:
 
         try:
             image_bytes = None
+            reply_image_bytes = None
             if message.photo:
                 image_bytes = await download_largest_photo_bytes(bot, message)
+            elif _is_reference_image_reply_command(message):
+                reply_image_bytes = await download_largest_photo_bytes(
+                    bot,
+                    message.reply_to_message,
+                )
 
             inbound = normalize_message(
                 message=message,
                 update_id=update_id,
                 image_bytes=image_bytes,
+                reply_image_bytes=reply_image_bytes,
                 image_max_bytes=self.settings.bot_image_max_bytes,
             )
         except Exception as exc:
@@ -129,3 +136,19 @@ def build_router(processor: TelegramUpdateProcessor) -> Router:
         )
 
     return router
+
+
+def _is_reference_image_reply_command(message: Message) -> bool:
+    reply_message = message.reply_to_message
+    if message.text is None or reply_message is None:
+        return False
+    if not getattr(reply_message, "photo", None):
+        return False
+    stripped_text = message.text.strip()
+    if not stripped_text:
+        return False
+    token = stripped_text.split(maxsplit=1)[0]
+    if not token.startswith("/"):
+        return False
+    command = token.split("@", maxsplit=1)[0].lower()
+    return command in {"/image", "/video", "/video_ltx"}

@@ -97,6 +97,32 @@ def make_image_command_message(
     )
 
 
+def make_reply_photo_command_message(
+    *,
+    user_id: int,
+    chat_id: int,
+    command: str,
+    update_id: int = 1,
+) -> InboundMessage:
+    command_name = command.split(maxsplit=1)[0].split("@", maxsplit=1)[0].lower()
+    image = make_reference_image()
+    image.caption = None
+    return InboundMessage(
+        update_id=update_id,
+        telegram_message_id=update_id,
+        chat_id=chat_id,
+        chat_type="private",
+        user_id=user_id,
+        username="ritz",
+        first_name="Ritz",
+        message_type="command",
+        text=command,
+        command=command_name,
+        image=image,
+        sent_at=utc_datetime(),
+    )
+
+
 def make_image_message(
     *,
     user_id: int,
@@ -434,6 +460,34 @@ async def test_image_caption_command_passes_reference_image_for_gemini_model(
     assert stored_messages[0].image_file_unique_id == "uniq-ref"
 
 
+async def test_image_reply_photo_command_passes_reference_image_for_gemini_model(
+    service_bundle,
+) -> None:
+    service = service_bundle["service"]
+    image_generator = service_bundle["image_generator"]
+    emitter = FakeResponseEmitter()
+
+    service.settings.vertex_image_model = "gemini-3-pro-image-preview"
+    service.settings.vertex_location = "global"
+
+    reply = await service.handle_inbound(
+        make_reply_photo_command_message(
+            user_id=42,
+            chat_id=230,
+            command="/image make this cinematic",
+            update_id=24,
+        ),
+        responder=emitter,
+    )
+
+    assert reply.delivered is True
+    assert len(image_generator.calls) == 1
+    assert image_generator.calls[0].prompt == "make this cinematic"
+    assert image_generator.calls[0].reference_image is not None
+    assert image_generator.calls[0].reference_image.caption is None
+    assert image_generator.calls[0].reference_image.telegram_file_unique_id == "uniq-ref"
+
+
 async def test_image_caption_command_rejects_imagen_model_without_provider_call(
     service_bundle,
 ) -> None:
@@ -738,6 +792,60 @@ async def test_video_reference_uses_saved_runpod_reference_strength(service_bund
     assert request.provider_hint == "runpod"
     assert request.reference_image is not None
     assert request.image_strength == 0.9
+
+
+async def test_video_reply_photo_command_passes_reference_image_to_submission(
+    service_bundle,
+) -> None:
+    service = service_bundle["service"]
+    video_generator = service_bundle["video_generator"]
+    emitter = FakeResponseEmitter()
+
+    reply = await service.handle_inbound(
+        make_reply_photo_command_message(
+            user_id=42,
+            chat_id=231,
+            command="/video animate this with a slow camera push",
+            update_id=25,
+        ),
+        responder=emitter,
+    )
+
+    assert reply.text == "Video generation started. I'll send it here when it's ready."
+    assert len(video_generator.submit_calls) == 1
+    request = video_generator.submit_calls[0]
+    assert request.provider_hint == "auto"
+    assert request.prompt == "animate this with a slow camera push"
+    assert request.reference_image is not None
+    assert request.reference_image.caption is None
+    assert request.reference_image.telegram_file_unique_id == "uniq-ref"
+
+
+async def test_video_ltx_reply_photo_command_passes_reference_image_to_runpod_submission(
+    service_bundle,
+) -> None:
+    service = service_bundle["service"]
+    video_generator = service_bundle["video_generator"]
+    emitter = FakeResponseEmitter()
+
+    reply = await service.handle_inbound(
+        make_reply_photo_command_message(
+            user_id=42,
+            chat_id=232,
+            command="/video_ltx animate this subject",
+            update_id=26,
+        ),
+        responder=emitter,
+    )
+
+    assert reply.text == "Video generation started. I'll send it here when it's ready."
+    assert len(video_generator.submit_calls) == 1
+    request = video_generator.submit_calls[0]
+    assert request.provider_hint == "runpod"
+    assert request.prompt == "animate this subject"
+    assert request.reference_image is not None
+    assert request.reference_image.caption is None
+    assert request.reference_image.telegram_file_unique_id == "uniq-ref"
 
 
 async def test_image_command_uses_saved_image_preset(service_bundle) -> None:

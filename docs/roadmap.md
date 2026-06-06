@@ -26,7 +26,7 @@ This document separates the current repo state from the planned delivery phases.
   - completed video jobs now deliver through Telegram `sendVideo`
   - video asset retention rules are now explicit: inline bytes stay transient in memory, while URI-backed outputs rely on external bucket lifecycle policy
   - Phase 4 now includes log-only usage observability, production JSON log formatting, and optional config-driven cost estimates for chat, image, and video generation
-  - Phase 4 now supports Telegram photo captions that start with `/image`, `/video`, or `/video_ltx` as reference-image generation commands
+  - Phase 4 now supports Telegram photo captions that start with `/image`, `/video`, or `/video_ltx`, and text commands that reply to a Telegram photo, as reference-image generation commands
   - Phase 4 now has a provider-neutral video router: `/video` tries Vertex first and falls back to Runpod LTX only on classified Vertex safety rejections, while `/video_ltx` forces Runpod for manual testing
   - Phase 4 now includes `/settings` inline-button presets stored per chat and user for safe video provider, video duration, video aspect/orientation, Runpod LTX, image, and chat request tuning
 
@@ -48,15 +48,15 @@ As of `2026-06-06`, this repository contains the completed Phase 1 foundation, t
 - Runpod GCS-backed outputs are downloaded through transient bot-side signed URLs while storing only durable `gs://` output URIs.
 - An in-process polling worker now checks pending video jobs and delivers completed assets through Telegram `sendVideo`.
 - Video job persistence stores operation state, output URIs, failure reasons, and Telegram delivery metadata without persisting raw video bytes in SQLite.
-- Tests exist under `tests/` for health and readiness behavior, normalization, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, supersession, Telegram formatting, image generation, video job submission, worker completion, worker failure handling, Vertex video, Runpod video, and provider routing.
+- Tests exist under `tests/` for health and readiness behavior, normalization, reply-to-photo reference commands, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, supersession, Telegram formatting, image generation, video job submission, worker completion, worker failure handling, Vertex video, Runpod video, and provider routing.
 - Real Vertex, Runpod, and Telegram verification still depends on configured credentials and a manual runtime check.
 - Inline generated video bytes remain transient in memory only, while URI-backed assets are expected to live in a bucket with lifecycle cleanup managed outside the app.
 - Phase 4 has started with a real webhook deployment path: webhook mode now registers the Telegram webhook on startup, validates the `X-Telegram-Bot-Api-Secret-Token` header on inbound requests, and reports webhook setup state through readiness.
 - Phase 4 now logs usage units and optional best-effort cost estimates for OpenAI chat, Vertex image generation, Vertex/Runpod video submission, and completed video delivery without adding a metrics backend or billing reconciliation.
 - Phase 4 now supports `APP_LOG_FORMAT=json` for production structured logs, keeps readable text logs as the local default, suppresses successful low-level HTTP client logs below `WARNING`, and keeps repeated still-running video poll state at `DEBUG`.
-- Photo captions that start with `/image <prompt>` use the photo as a transient reference image for Gemini image generation; Imagen remains prompt-to-image only.
-- Photo captions that start with `/video <prompt>` queue an image-to-video job using the photo as a transient reference image.
-- Photo captions that start with `/video_ltx <prompt>` queue a Runpod LTX image-to-video job using the photo as a transient reference image when it is under the configured Runpod reference-image size cap.
+- Photo captions that start with `/image <prompt>`, or text `/image <prompt>` commands that reply to a Telegram photo, use that photo as a transient reference image for Gemini image generation; Imagen remains prompt-to-image only.
+- Photo captions that start with `/video <prompt>`, or text `/video <prompt>` commands that reply to a Telegram photo, queue an image-to-video job using that photo as a transient reference image.
+- Photo captions that start with `/video_ltx <prompt>`, or text `/video_ltx <prompt>` commands that reply to a Telegram photo, queue a Runpod LTX image-to-video job using that photo as a transient reference image when it is under the configured Runpod reference-image size cap.
 - Normal photo captions that do not start with `/image`, `/video`, or `/video_ltx` continue through the OpenAI image-understanding path.
 
 ## Recommended Sequencing
@@ -255,7 +255,7 @@ Current Phase 4 progress:
 - production can set `APP_LOG_FORMAT=json` to emit those fields as parseable JSON instead of local text
 - repeated still-running video polling and successful low-level HTTP client logs no longer dominate INFO-level production logs
 - cost estimates are optional, configuration-driven, and disabled by default so pricing can be updated without code changes
-- `/image`, `/video`, and `/video_ltx` now accept a Telegram photo-caption reference image without storing raw reference bytes in SQLite
+- `/image`, `/video`, and `/video_ltx` now accept a Telegram photo-caption or reply-to-photo reference image without storing raw reference bytes in SQLite
 - `/video` now falls back from Vertex to Runpod only for classified Vertex safety/unsafe rejections
 - `/video_ltx` now forces Runpod LTX and persists queued jobs with the Runpod provider
 - `/settings` now exposes inline-button presets for video provider, video duration, video aspect/orientation, safe Runpod LTX, image, and chat request settings while keeping secrets and infrastructure settings environment-only

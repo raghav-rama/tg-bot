@@ -13,7 +13,7 @@ Phase 3 is now accepted as complete for repo sequencing.
 Phase 4 reference-image note:
 
 - Phase 3 shipped text-to-video only.
-- Phase 4 extends `/video` so a Telegram photo captioned `/video <prompt>` can queue an image-to-video job using that photo as a transient reference image.
+- Phase 4 extends `/video` so a Telegram photo captioned `/video <prompt>`, or a text `/video <prompt>` command that replies to a Telegram photo, can queue an image-to-video job using that photo as a transient reference image.
 - Phase 4 also adds Runpod-hosted LTX routing: `/video` falls back to Runpod only when Vertex returns a classified safety/unsafe rejection, and `/video_ltx <prompt>` forces Runpod for manual testing.
 - Phase 4 Runpod LTX routing uses native LTX dimensions and frame counts, and can deliver GCS-backed worker outputs by signing the durable `gs://` asset URI transiently in the bot process.
 - Raw reference photo bytes remain request-only inputs and are not persisted in SQLite.

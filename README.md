@@ -18,7 +18,7 @@ Implemented today:
 - `/video_ltx <prompt>` queued generation directly through Runpod LTX for manual testing
 - `/settings` inline-button presets for per-chat/per-user video provider, duration, aspect ratio, safe Runpod LTX, image, and chat request settings
 - SQLite-backed video jobs, background polling, and Telegram `sendVideo`
-- photo captions that start with `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>` use the photo as a transient reference image for generation
+- photo captions that start with `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>` use the photo as a transient reference image for generation; text commands can also reply to any Telegram photo to use that photo as the reference
 - log-only usage observability with production JSON logs, local text logs by default, and optional config-driven cost estimates for chat, image, and video generation
 - health and readiness endpoints plus automated tests
 
@@ -39,6 +39,7 @@ Inbound inputs:
 - plain text messages
 - one photo with an optional caption
 - one photo with a caption that starts with `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>`
+- text `/image`, `/video`, or `/video_ltx` commands that reply to one Telegram photo
 - commands: `/start`, `/help`, `/status`, `/reset`, `/settings`, `/image`, `/video`, `/video_ltx`
 
 Outbound outputs:
@@ -207,7 +208,7 @@ Image model notes:
 - Imagen remains the default `/image` model path and uses the dedicated Vertex `generate_images` API.
 - Gemini image models are supported through the Vertex `generate_content` API.
 - `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`.
-- To use a Telegram photo as a reference image, send the photo with a caption like `/image restyle this as a pencil sketch`; this requires a Gemini image model.
+- To use a Telegram photo as a reference image, send the photo with a caption like `/image restyle this as a pencil sketch`, or reply to any Telegram photo with `/image <prompt>`; this requires a Gemini image model.
 
 Vertex video settings:
 
@@ -315,6 +316,7 @@ Reference-image commands:
 - send one photo with caption `/image <prompt>` to use that photo as the image-generation reference; this path requires a Gemini image model
 - send one photo with caption `/video <prompt>` to queue an image-to-video job using that photo as the first-frame reference
 - send one photo with caption `/video_ltx <prompt>` to queue a Runpod LTX image-to-video job using that photo as the reference image
+- reply to any Telegram photo with text `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>` to use the replied photo as the reference image
 - send one photo with any other caption to keep using the normal OpenAI image-understanding path
 
 Settings presets:
@@ -334,7 +336,7 @@ Run the test suite:
 uv run pytest
 ```
 
-The repository already includes tests for health and readiness, normalization, allowlist handling, history reuse, reset behavior, draft streaming and fallback, Telegram formatting, image generation, reference-image command captions, video job handling, Vertex provider flows, Runpod provider flows, and video provider routing.
+The repository already includes tests for health and readiness, normalization, allowlist handling, history reuse, reset behavior, draft streaming and fallback, Telegram formatting, image generation, reference-image command captions and reply-to-photo commands, video job handling, Vertex provider flows, Runpod provider flows, and video provider routing.
 
 ## Project Layout
 
