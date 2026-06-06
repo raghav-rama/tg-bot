@@ -87,12 +87,20 @@ class RunpodVideoProvider:
             ),
             "frame_rate": frame_rate,
         }
+        if request.pipeline is not None:
+            input_payload["pipeline"] = request.pipeline
+        if request.pipeline == "two_stage" and request.num_inference_steps is not None:
+            input_payload["num_inference_steps"] = request.num_inference_steps
+        if request.seed is not None:
+            input_payload["seed"] = request.seed
         if request.reference_image is not None:
             if request.reference_image.byte_size <= self.reference_image_max_bytes:
                 input_payload["image_base64"] = (
                     f"data:{request.reference_image.mime_type};base64,"
                     f"{request.reference_image.bytes_b64}"
                 )
+                if request.image_strength is not None:
+                    input_payload["image_strength"] = request.image_strength
             else:
                 self.logger.info(
                     log_kv(

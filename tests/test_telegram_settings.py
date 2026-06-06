@@ -32,7 +32,7 @@ async def test_processor_handles_settings_callback(service_bundle) -> None:
         settings=service_bundle["settings"],
     )
     callback = FakeCallbackQuery(
-        data="prefs:video:runpod_ltx_distilled_portrait_4s",
+        data="prefs:video_duration:duration_8s",
     )
 
     await processor.process_callback(callback=callback, update_id=77)
@@ -40,10 +40,10 @@ async def test_processor_handles_settings_callback(service_bundle) -> None:
     stored = await service_bundle["preferences"].get_preference(
         chat_id=100,
         user_id=42,
-        preference_type="video",
+        preference_type="video_duration",
     )
     assert stored is not None
-    assert stored.preset_id == "runpod_ltx_distilled_portrait_4s"
+    assert stored.preset_id == "duration_8s"
     assert callback.answers == [{"text": "Settings updated."}]
-    assert "Video: Runpod LTX distilled portrait 4s" in callback.message.edits[0]["text"]
+    assert "Video duration: 8s" in callback.message.edits[0]["text"]
     assert callback.message.edits[0]["reply_markup"] is not None

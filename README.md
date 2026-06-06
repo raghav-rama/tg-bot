@@ -16,7 +16,7 @@ Implemented today:
 - `/image <prompt>` generation through Vertex AI and Telegram `sendPhoto`
 - `/video <prompt>` queued generation through Vertex AI with Runpod LTX fallback on Vertex safety rejections
 - `/video_ltx <prompt>` queued generation directly through Runpod LTX for manual testing
-- `/settings` inline-button presets for per-chat/per-user video, image, and chat request settings
+- `/settings` inline-button presets for per-chat/per-user video provider, duration, aspect ratio, safe Runpod LTX, image, and chat request settings
 - SQLite-backed video jobs, background polling, and Telegram `sendVideo`
 - photo captions that start with `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>` use the photo as a transient reference image for generation
 - log-only usage observability with production JSON logs, local text logs by default, and optional config-driven cost estimates for chat, image, and video generation
@@ -241,7 +241,8 @@ Runpod worker contract:
 
 - deploy a queue-based Serverless endpoint that accepts `/run` and `/status/{job_id}`
 - the endpoint ID setting is the plain Runpod endpoint ID, not the `/v2/.../run` URL path
-- request input is `prompt`, `model`, `width`, `height`, `num_frames`, `frame_rate`, and optional `image_base64`
+- request input is `prompt`, `model`, `width`, `height`, `num_frames`, `frame_rate`, optional `pipeline`, optional two-stage `num_inference_steps`, optional `seed`, and optional reference-image fields such as `image_base64` and `image_strength`
+- the bot never sends Vertex-style `aspect_ratio` or ignored `steps` fields to Runpod
 - for LTX, `num_frames` is snapped to the nearest valid `8k+1` frame count at or above the requested duration
 - completed output may include a direct URL such as `video_url`, or LTX durable-upload metadata under `s3.bucket`, `s3.key`, and `s3.endpoint_url`
 - for GCS-backed `s3` output, the bot signs the derived `gs://bucket/key` URL transiently, downloads it for Telegram delivery, and persists only the durable `gs://` URI
@@ -304,7 +305,7 @@ docker run --rm \
 - `/help`: list supported commands and message types
 - `/status`: show update mode, configured models, and memory status
 - `/reset`: archive the current conversation and start a fresh one
-- `/settings`: choose per-chat/per-user video, image, and chat presets with inline buttons
+- `/settings`: choose per-chat/per-user video, image, and chat settings with inline buttons
 - `/image <prompt>`: generate one image through Vertex AI
 - `/video <prompt>`: queue one short video through Vertex AI, with Runpod fallback only on Vertex safety rejections
 - `/video_ltx <prompt>`: queue one short video directly through Runpod LTX
@@ -319,10 +320,11 @@ Reference-image commands:
 Settings presets:
 
 - `/settings` stores preferences per `chat_id` and `user_id`; missing preferences use the environment defaults
-- video presets can choose provider/model strategy, Runpod dimensions, duration, and frame rate
+- video settings can independently choose provider, duration, and aspect ratio/orientation
+- Runpod settings can choose LTX pipeline, two-stage quality, fixed or random seed, and reference-image strength
 - image presets can choose the image model, aspect ratio, and output MIME type
 - chat presets can choose creativity, response length, and memory depth
-- secrets, endpoint IDs, storage paths, and infrastructure timeouts remain environment-only
+- secrets, endpoint IDs, storage paths, checkpoint paths, LoRA paths, offload/quantization/compile controls, and infrastructure timeouts remain environment-only
 
 ## Testing
 

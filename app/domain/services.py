@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -56,8 +57,15 @@ from app.domain.preferences import (
     chat_preset_for,
     image_preset_for,
     parse_settings_callback,
+    preset_for_preference,
+    runpod_pipeline_preset_for,
+    runpod_quality_preset_for,
+    runpod_reference_strength_preset_for,
+    runpod_seed_preset_for,
     settings_menu_for,
-    video_preset_for,
+    video_duration_preset_for,
+    video_orientation_preset_for,
+    video_provider_preset_for,
 )
 from app.logging import log_kv
 from app.observability import (
@@ -408,11 +416,7 @@ class ChatService:
         )
         if preference is None:
             return None
-        if preference_type == "video" and video_preset_for(preference.preset_id) is None:
-            return None
-        if preference_type == "image" and image_preset_for(preference.preset_id) is None:
-            return None
-        if preference_type == "chat" and chat_preset_for(preference.preset_id) is None:
+        if preset_for_preference(preference_type, preference.preset_id) is None:
             return None
         return preference
 
@@ -682,44 +686,128 @@ class ChatService:
             return ServiceReply(text=VIDEO_GENERATION_NOT_CONFIGURED_TEXT)
 
         await self._persist_user_command_message(conversation, message)
-        video_preference = await self._preference_for_user(
+        video_provider_preference = await self._preference_for_user(
             chat_id=message.chat_id,
             user_id=message.user_id,
-            preference_type="video",
+            preference_type="video_provider",
         )
-        video_preset = (
-            video_preset_for(video_preference.preset_id)
-            if video_preference is not None
+        video_provider_preset = (
+            video_provider_preset_for(video_provider_preference.preset_id)
+            if video_provider_preference is not None
+            else None
+        )
+        duration_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="video_duration",
+        )
+        duration_preset = (
+            video_duration_preset_for(duration_preference.preset_id)
+            if duration_preference is not None
+            else None
+        )
+        orientation_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="video_orientation",
+        )
+        orientation_preset = (
+            video_orientation_preset_for(orientation_preference.preset_id)
+            if orientation_preference is not None
+            else None
+        )
+        pipeline_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="runpod_pipeline",
+        )
+        pipeline_preset = (
+            runpod_pipeline_preset_for(pipeline_preference.preset_id)
+            if pipeline_preference is not None
+            else None
+        )
+        quality_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="runpod_quality",
+        )
+        quality_preset = (
+            runpod_quality_preset_for(quality_preference.preset_id)
+            if quality_preference is not None
+            else None
+        )
+        seed_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="runpod_seed",
+        )
+        seed_preset = (
+            runpod_seed_preset_for(seed_preference.preset_id)
+            if seed_preference is not None
+            else None
+        )
+        reference_strength_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="runpod_reference_strength",
+        )
+        reference_strength_preset = (
+            runpod_reference_strength_preset_for(
+                reference_strength_preference.preset_id,
+            )
+            if reference_strength_preference is not None
             else None
         )
         command_forces_runpod = (message.command or "").lower() == "/video_ltx"
         provider_hint = (
             "runpod"
             if command_forces_runpod
-            else (video_preset.provider_hint if video_preset is not None else "auto")
+            else (
+                video_provider_preset.provider_hint
+                if video_provider_preset is not None
+                else "auto"
+            )
         )
         requested_provider = "runpod" if provider_hint == "runpod" else "vertex"
+        requested_pipeline = None
+        requested_num_inference_steps = None
+        requested_seed = None
+        requested_image_strength = None
+        model_locked = False
+        if requested_provider == "runpod":
+            if pipeline_preset is not None:
+                requested_pipeline = pipeline_preset.pipeline
+                model_locked = True
+            if requested_pipeline == "two_stage" and quality_preset is not None:
+                requested_num_inference_steps = quality_preset.num_inference_steps
+            if seed_preset is not None:
+                requested_seed = (
+                    random.randint(0, 2_147_483_647)
+                    if seed_preset.randomize
+                    else seed_preset.seed
+                )
+            if message.image is not None and reference_strength_preset is not None:
+                requested_image_strength = reference_strength_preset.image_strength
+
         requested_model = (
-            video_preset.model
-            if video_preset is not None
-            and video_preset.model is not None
-            and (not command_forces_runpod or video_preset.provider_hint == "runpod")
+            pipeline_preset.model
+            if requested_provider == "runpod" and pipeline_preset is not None
             else self._video_model_for_provider(requested_provider)
         )
         requested_aspect_ratio = (
-            video_preset.aspect_ratio
-            if video_preset is not None and video_preset.aspect_ratio is not None
+            orientation_preset.vertex_aspect_ratio
+            if orientation_preset is not None
             else self.settings.vertex_video_aspect_ratio
         )
         requested_duration_seconds = (
-            video_preset.duration_seconds
-            if video_preset is not None and video_preset.duration_seconds is not None
+            duration_preset.duration_seconds
+            if duration_preset is not None
             else self._video_duration_for_provider(requested_provider)
         )
         requested_cost_per_second = self._video_cost_for_provider(requested_provider)
         requested_width = (
-            video_preset.width
-            if video_preset is not None and video_preset.width is not None
+            orientation_preset.runpod_width
+            if orientation_preset is not None and requested_provider == "runpod"
             else (
                 self.settings.runpod_video_width
                 if requested_provider == "runpod"
@@ -727,8 +815,8 @@ class ChatService:
             )
         )
         requested_height = (
-            video_preset.height
-            if video_preset is not None and video_preset.height is not None
+            orientation_preset.runpod_height
+            if orientation_preset is not None and requested_provider == "runpod"
             else (
                 self.settings.runpod_video_height
                 if requested_provider == "runpod"
@@ -736,13 +824,9 @@ class ChatService:
             )
         )
         requested_frame_rate = (
-            video_preset.frame_rate
-            if video_preset is not None and video_preset.frame_rate is not None
-            else (
-                self.settings.runpod_video_frame_rate
-                if requested_provider == "runpod"
-                else None
-            )
+            self.settings.runpod_video_frame_rate
+            if requested_provider == "runpod"
+            else None
         )
         usage_fields = estimate_video_usage(
             prompt=prompt,
@@ -762,6 +846,10 @@ class ChatService:
                 output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
                 runpod_width=requested_width,
                 runpod_height=requested_height,
+                runpod_pipeline=requested_pipeline,
+                runpod_num_inference_steps=requested_num_inference_steps,
+                runpod_seed=requested_seed,
+                runpod_image_strength=requested_image_strength,
                 **usage_fields,
             )
         )
@@ -779,7 +867,11 @@ class ChatService:
                 width=requested_width,
                 height=requested_height,
                 frame_rate=requested_frame_rate,
-                model_locked=video_preset is not None and video_preset.model is not None,
+                pipeline=requested_pipeline,
+                num_inference_steps=requested_num_inference_steps,
+                seed=requested_seed,
+                image_strength=requested_image_strength,
+                model_locked=model_locked,
             )
         )
         self.logger.info(
@@ -809,7 +901,7 @@ class ChatService:
         await self.conversations.touch(conversation.id)
         usage_fields = estimate_video_usage(
             prompt=prompt,
-            duration_seconds=self._video_duration_for_provider(submitted_job.provider),
+            duration_seconds=requested_duration_seconds,
             cost_per_second_usd=self._video_cost_for_provider(submitted_job.provider),
         )
         return ServiceReply(text=VIDEO_GENERATION_QUEUED_TEXT, usage_fields=usage_fields)

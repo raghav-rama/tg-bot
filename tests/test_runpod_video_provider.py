@@ -15,7 +15,14 @@ from app.domain.models import (
 from app.providers.runpod_video_provider import RunpodVideoProvider
 
 
-def make_request(*, reference_image: ImageInput | None = None) -> VideoGenerationRequest:
+def make_request(
+    *,
+    reference_image: ImageInput | None = None,
+    pipeline: str | None = None,
+    num_inference_steps: int | None = None,
+    seed: int | None = None,
+    image_strength: float | None = None,
+) -> VideoGenerationRequest:
     return VideoGenerationRequest(
         chat_id=1,
         user_id=42,
@@ -26,6 +33,10 @@ def make_request(*, reference_image: ImageInput | None = None) -> VideoGeneratio
         output_gcs_uri=None,
         reference_image=reference_image,
         provider_hint="runpod",
+        pipeline=pipeline,
+        num_inference_steps=num_inference_steps,
+        seed=seed,
+        image_strength=image_strength,
     )
 
 
@@ -116,6 +127,59 @@ async def test_submit_video_includes_reference_image_only_under_size_cap() -> No
         + base64.b64encode(b"reference-image").decode("ascii")
     )
     assert "image_base64" not in requests[1]["input"]
+
+
+@pytest.mark.asyncio
+async def test_submit_video_sends_two_stage_pipeline_steps_seed_and_reference_strength() -> None:
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": "runpod-job-1"})
+
+    provider = make_provider(handler)
+
+    await provider.submit_video(
+        make_request(
+            reference_image=make_reference_image(),
+            pipeline="two_stage",
+            num_inference_steps=50,
+            seed=12345,
+            image_strength=0.9,
+        )
+    )
+
+    input_payload = requests[0]["input"]
+    assert input_payload["pipeline"] == "two_stage"
+    assert input_payload["num_inference_steps"] == 50
+    assert input_payload["seed"] == 12345
+    assert input_payload["image_strength"] == 0.9
+    assert "aspect_ratio" not in input_payload
+    assert "steps" not in input_payload
+
+
+@pytest.mark.asyncio
+async def test_submit_video_omits_inference_steps_when_distilled_pipeline_selected() -> None:
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": "runpod-job-1"})
+
+    provider = make_provider(handler)
+
+    await provider.submit_video(
+        make_request(
+            pipeline="distilled",
+            num_inference_steps=None,
+            seed=10,
+        )
+    )
+
+    input_payload = requests[0]["input"]
+    assert input_payload["pipeline"] == "distilled"
+    assert input_payload["seed"] == 10
+    assert "num_inference_steps" not in input_payload
 
 
 @pytest.mark.asyncio

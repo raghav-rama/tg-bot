@@ -287,17 +287,17 @@ async def test_settings_callback_persists_user_preference(service_bundle) -> Non
     reply = await service.handle_settings_callback(
         chat_id=100,
         user_id=42,
-        callback_data="prefs:video:runpod_ltx_distilled_portrait_4s",
+        callback_data="prefs:video_provider:runpod",
     )
     stored = await preferences.get_preference(
         chat_id=100,
         user_id=42,
-        preference_type="video",
+        preference_type="video_provider",
     )
 
     assert stored is not None
-    assert stored.preset_id == "runpod_ltx_distilled_portrait_4s"
-    assert "Video: Runpod LTX distilled portrait 4s" in reply.text
+    assert stored.preset_id == "runpod"
+    assert "Video provider: Runpod LTX" in reply.text
     assert reply.settings_menu is not None
 
 
@@ -641,16 +641,52 @@ async def test_video_ltx_command_submits_runpod_job(service_bundle) -> None:
     assert stored_jobs[0].prompt_text == "simple cinematic shot of clouds over a valley"
 
 
-async def test_video_command_uses_saved_video_preset(service_bundle) -> None:
+async def test_video_command_uses_saved_video_preferences(service_bundle, monkeypatch) -> None:
     service = service_bundle["service"]
     preferences = service_bundle["preferences"]
     video_generator = service_bundle["video_generator"]
 
+    monkeypatch.setattr("app.domain.services.random.randint", lambda _min, _max: 12345)
     await preferences.set_preference(
         chat_id=226,
         user_id=42,
-        preference_type="video",
-        preset_id="runpod_ltx_distilled_portrait_4s",
+        preference_type="video_provider",
+        preset_id="runpod",
+        updated_at=utc_datetime(),
+    )
+    await preferences.set_preference(
+        chat_id=226,
+        user_id=42,
+        preference_type="video_duration",
+        preset_id="duration_8s",
+        updated_at=utc_datetime(),
+    )
+    await preferences.set_preference(
+        chat_id=226,
+        user_id=42,
+        preference_type="video_orientation",
+        preset_id="portrait_9_16",
+        updated_at=utc_datetime(),
+    )
+    await preferences.set_preference(
+        chat_id=226,
+        user_id=42,
+        preference_type="runpod_pipeline",
+        preset_id="two_stage",
+        updated_at=utc_datetime(),
+    )
+    await preferences.set_preference(
+        chat_id=226,
+        user_id=42,
+        preference_type="runpod_quality",
+        preset_id="high",
+        updated_at=utc_datetime(),
+    )
+    await preferences.set_preference(
+        chat_id=226,
+        user_id=42,
+        preference_type="runpod_seed",
+        preset_id="random",
         updated_at=utc_datetime(),
     )
 
@@ -665,11 +701,43 @@ async def test_video_command_uses_saved_video_preset(service_bundle) -> None:
 
     request = video_generator.submit_calls[0]
     assert request.provider_hint == "runpod"
-    assert request.model == "ltx-2.3-22b-distilled-1.1"
+    assert request.model == "ltx-2.3-22b"
     assert request.width == 576
     assert request.height == 1024
-    assert request.duration_seconds == 4
+    assert request.duration_seconds == 8
     assert request.frame_rate == 24.0
+    assert request.pipeline == "two_stage"
+    assert request.num_inference_steps == 50
+    assert request.seed == 12345
+    assert request.model_locked is True
+
+
+async def test_video_reference_uses_saved_runpod_reference_strength(service_bundle) -> None:
+    service = service_bundle["service"]
+    preferences = service_bundle["preferences"]
+    video_generator = service_bundle["video_generator"]
+
+    await preferences.set_preference(
+        chat_id=229,
+        user_id=42,
+        preference_type="runpod_reference_strength",
+        preset_id="high",
+        updated_at=utc_datetime(),
+    )
+
+    await service.handle_inbound(
+        make_image_command_message(
+            user_id=42,
+            chat_id=229,
+            command="/video_ltx animate the subject",
+            update_id=23,
+        ),
+    )
+
+    request = video_generator.submit_calls[0]
+    assert request.provider_hint == "runpod"
+    assert request.reference_image is not None
+    assert request.image_strength == 0.9
 
 
 async def test_image_command_uses_saved_image_preset(service_bundle) -> None:

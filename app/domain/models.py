@@ -10,7 +10,18 @@ ChatType = Literal["private", "group", "supergroup", "channel"]
 GenerationJobStatus = Literal["queued", "running", "completed", "failed"]
 VideoProviderName = Literal["vertex", "runpod"]
 VideoProviderHint = Literal["auto", "vertex", "runpod"]
-PreferenceType = Literal["video", "image", "chat"]
+PreferenceType = Literal[
+    "video",
+    "video_provider",
+    "video_duration",
+    "video_orientation",
+    "runpod_pipeline",
+    "runpod_quality",
+    "runpod_seed",
+    "runpod_reference_strength",
+    "image",
+    "chat",
+]
 
 
 @dataclass(slots=True)
@@ -195,6 +206,10 @@ class VideoGenerationRequest:
     width: int | None = None
     height: int | None = None
     frame_rate: float | None = None
+    pipeline: str | None = None
+    num_inference_steps: int | None = None
+    seed: int | None = None
+    image_strength: float | None = None
     model_locked: bool = False
 
 
