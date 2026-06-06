@@ -10,4 +10,4 @@ sqlite_parent="$(dirname "$SQLITE_PATH")"
 mkdir -p "$sqlite_parent"
 chown -R "$APP_USER:$APP_GROUP" "$sqlite_parent"
 
-exec su -s /bin/sh "$APP_USER" -c 'exec "$@"' sh "$@"
+exec su -s /bin/sh -c 'exec "$@"' "$APP_USER" sh "$@"

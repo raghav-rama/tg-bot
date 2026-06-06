@@ -22,4 +22,5 @@ def test_entrypoint_prepares_sqlite_parent_before_dropping_privileges() -> None:
     assert "sqlite_parent=" in entrypoint
     assert "mkdir -p \"$sqlite_parent\"" in entrypoint
     assert "chown -R \"$APP_USER:$APP_GROUP\" \"$sqlite_parent\"" in entrypoint
-    assert 'exec su -s /bin/sh "$APP_USER"' in entrypoint
+    assert 'exec su -s /bin/sh -c \'exec "$@"\' "$APP_USER" sh "$@"' in entrypoint
+    assert 'su -s /bin/sh "$APP_USER" -c' not in entrypoint
