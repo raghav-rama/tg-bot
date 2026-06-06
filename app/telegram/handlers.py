@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Bot, Router
-from aiogram.types import Message, Update
+from aiogram import Bot, F, Router
+from aiogram.types import CallbackQuery, Message, Update
 
 from app.config import Settings
+from app.domain.preferences import SETTINGS_UPDATED_TEXT, parse_settings_callback
 from app.domain.services import ChatService
 from app.logging import log_kv
-from app.telegram.drafts import TelegramResponseEmitter
+from app.telegram.drafts import TelegramResponseEmitter, _settings_menu_markup
 from app.telegram.media import download_largest_photo_bytes
 from app.telegram.normalizer import normalize_message
 
@@ -32,13 +33,20 @@ class TelegramUpdateProcessor:
 
         try:
             image_bytes = None
+            reply_image_bytes = None
             if message.photo:
                 image_bytes = await download_largest_photo_bytes(bot, message)
+            elif _is_reference_image_reply_command(message):
+                reply_image_bytes = await download_largest_photo_bytes(
+                    bot,
+                    message.reply_to_message,
+                )
 
             inbound = normalize_message(
                 message=message,
                 update_id=update_id,
                 image_bytes=image_bytes,
+                reply_image_bytes=reply_image_bytes,
                 image_max_bytes=self.settings.bot_image_max_bytes,
             )
         except Exception as exc:
@@ -65,6 +73,42 @@ class TelegramUpdateProcessor:
                 )
             )
 
+    async def process_callback(
+        self,
+        *,
+        callback: CallbackQuery,
+        update_id: int,
+    ) -> None:
+        callback_message = callback.message
+        if callback.from_user is None or callback_message is None:
+            await callback.answer(text="Unsupported settings action.", show_alert=True)
+            return
+        chat = getattr(callback_message, "chat", None)
+        if chat is None:
+            await callback.answer(text="Unsupported settings action.", show_alert=True)
+            return
+
+        reply = await self.chat_service.handle_settings_callback(
+            chat_id=chat.id,
+            user_id=callback.from_user.id,
+            callback_data=callback.data,
+        )
+        parsed = parse_settings_callback(callback.data)
+        if reply.error_type is not None:
+            await callback.answer(text=reply.text, show_alert=True)
+            return
+        elif parsed is not None and parsed[0] == "set":
+            await callback.answer(text=SETTINGS_UPDATED_TEXT)
+        else:
+            await callback.answer()
+
+        edit_text = getattr(callback_message, "edit_text", None)
+        if reply.text and edit_text is not None:
+            await edit_text(
+                text=reply.text,
+                reply_markup=_settings_menu_markup(reply.settings_menu),
+            )
+
 
 def build_router(processor: TelegramUpdateProcessor) -> Router:
     router = Router()
@@ -81,4 +125,30 @@ def build_router(processor: TelegramUpdateProcessor) -> Router:
             update_id=event_update.update_id,
         )
 
+    @router.callback_query(F.data.startswith("prefs:"))
+    async def on_settings_callback(
+        callback: CallbackQuery,
+        event_update: Update,
+    ) -> None:
+        await processor.process_callback(
+            callback=callback,
+            update_id=event_update.update_id,
+        )
+
     return router
+
+
+def _is_reference_image_reply_command(message: Message) -> bool:
+    reply_message = message.reply_to_message
+    if message.text is None or reply_message is None:
+        return False
+    if not getattr(reply_message, "photo", None):
+        return False
+    stripped_text = message.text.strip()
+    if not stripped_text:
+        return False
+    token = stripped_text.split(maxsplit=1)[0]
+    if not token.startswith("/"):
+        return False
+    command = token.split("@", maxsplit=1)[0].lower()
+    return command in {"/image", "/video", "/video_ltx"}

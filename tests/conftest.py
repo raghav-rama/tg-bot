@@ -22,6 +22,7 @@ from app.storage.db import Database
 from app.storage.generation_jobs import GenerationJobRepository
 from app.storage.generated_images import GeneratedImageRepository
 from app.storage.messages import MessageRepository
+from app.storage.preferences import PreferenceRepository
 
 
 class FakeProvider:
@@ -115,9 +116,10 @@ class FakeVideoGenerator:
         self.submit_calls.append(request)
         if self.submit_error is not None:
             raise self.submit_error
+        provider = "runpod" if request.provider_hint == "runpod" else "vertex"
         return SubmittedVideoJob(
             operation_name=f"operations/{len(self.submit_calls)}",
-            provider="vertex",
+            provider=provider,
             raw_model=request.model,
         )
 
@@ -133,7 +135,7 @@ class FakeVideoGenerator:
             generated_video=GeneratedVideoResult(
                 video_bytes=self.video_bytes,
                 mime_type="video/mp4",
-                provider="vertex",
+                provider=request.provider,
                 raw_model=request.model,
                 prompt=request.prompt,
                 output_uri=None,
@@ -182,6 +184,7 @@ async def service_bundle(tmp_path):
     messages = MessageRepository(database)
     generated_images = GeneratedImageRepository(database)
     generation_jobs = GenerationJobRepository(database)
+    preferences = PreferenceRepository(database)
     provider = FakeProvider()
     image_generator = FakeImageGenerator()
     video_generator = FakeVideoGenerator()
@@ -194,6 +197,7 @@ async def service_bundle(tmp_path):
         image_generator=image_generator,
         generation_jobs=generation_jobs,
         video_generator=video_generator,
+        preferences=preferences,
     )
 
     yield {
@@ -203,6 +207,7 @@ async def service_bundle(tmp_path):
         "messages": messages,
         "generated_images": generated_images,
         "generation_jobs": generation_jobs,
+        "preferences": preferences,
         "provider": provider,
         "image_generator": image_generator,
         "video_generator": video_generator,

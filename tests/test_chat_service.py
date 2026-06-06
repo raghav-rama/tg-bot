@@ -97,6 +97,32 @@ def make_image_command_message(
     )
 
 
+def make_reply_photo_command_message(
+    *,
+    user_id: int,
+    chat_id: int,
+    command: str,
+    update_id: int = 1,
+) -> InboundMessage:
+    command_name = command.split(maxsplit=1)[0].split("@", maxsplit=1)[0].lower()
+    image = make_reference_image()
+    image.caption = None
+    return InboundMessage(
+        update_id=update_id,
+        telegram_message_id=update_id,
+        chat_id=chat_id,
+        chat_type="private",
+        user_id=user_id,
+        username="ritz",
+        first_name="Ritz",
+        message_type="command",
+        text=command,
+        command=command_name,
+        image=image,
+        sent_at=utc_datetime(),
+    )
+
+
 def make_image_message(
     *,
     user_id: int,
@@ -165,6 +191,7 @@ class FakeDraftSession:
 class FakeResponseEmitter:
     def __init__(self, *, draft_session: FakeDraftSession | None = None) -> None:
         self.sent_texts: list[str] = []
+        self.sent_menus = []
         self.sent_photos: list[bytes] = []
         self.sent_videos: list[bytes] = []
         self.draft_session = draft_session or FakeDraftSession()
@@ -188,8 +215,10 @@ class FakeResponseEmitter:
             file_size=4096,
         )
 
-    async def send_text(self, text: str) -> None:
+    async def send_text(self, text: str, settings_menu=None) -> None:
         self.sent_texts.append(text)
+        if settings_menu is not None:
+            self.sent_menus.append(settings_menu)
 
     async def send_photo(self, image) -> SentPhoto:
         self.sent_photos.append(image.image_bytes)
@@ -257,6 +286,45 @@ async def test_history_is_reused_for_follow_up_messages(service_bundle) -> None:
     assert provider.calls[1].history[0].text == "first"
     assert provider.calls[1].history[1].role == "assistant"
     assert provider.calls[1].history[1].text == "assistant reply"
+
+
+async def test_settings_command_returns_settings_menu(service_bundle) -> None:
+    service = service_bundle["service"]
+    provider = service_bundle["provider"]
+    emitter = FakeResponseEmitter()
+
+    reply = await service.handle_inbound(
+        make_command_message(user_id=42, chat_id=100, command="/settings"),
+        responder=emitter,
+    )
+
+    assert "Settings" in reply.text
+    assert reply.settings_menu is not None
+    assert reply.settings_menu.rows[0][0].callback_data == "prefs:menu:video"
+    assert emitter.sent_texts == [reply.text]
+    assert emitter.sent_menus == [reply.settings_menu]
+    assert provider.calls == []
+
+
+async def test_settings_callback_persists_user_preference(service_bundle) -> None:
+    service = service_bundle["service"]
+    preferences = service_bundle["preferences"]
+
+    reply = await service.handle_settings_callback(
+        chat_id=100,
+        user_id=42,
+        callback_data="prefs:video_provider:runpod",
+    )
+    stored = await preferences.get_preference(
+        chat_id=100,
+        user_id=42,
+        preference_type="video_provider",
+    )
+
+    assert stored is not None
+    assert stored.preset_id == "runpod"
+    assert "Video provider: 🚀 Runpod LTX" in reply.text
+    assert reply.settings_menu is not None
 
 
 async def test_text_message_logs_token_usage_and_cost_estimate(
@@ -390,6 +458,34 @@ async def test_image_caption_command_passes_reference_image_for_gemini_model(
     stored_messages = await messages.list_for_conversation(conversation.id)
     assert stored_messages[0].message_type == "command"
     assert stored_messages[0].image_file_unique_id == "uniq-ref"
+
+
+async def test_image_reply_photo_command_passes_reference_image_for_gemini_model(
+    service_bundle,
+) -> None:
+    service = service_bundle["service"]
+    image_generator = service_bundle["image_generator"]
+    emitter = FakeResponseEmitter()
+
+    service.settings.vertex_image_model = "gemini-3-pro-image-preview"
+    service.settings.vertex_location = "global"
+
+    reply = await service.handle_inbound(
+        make_reply_photo_command_message(
+            user_id=42,
+            chat_id=230,
+            command="/image make this cinematic",
+            update_id=24,
+        ),
+        responder=emitter,
+    )
+
+    assert reply.delivered is True
+    assert len(image_generator.calls) == 1
+    assert image_generator.calls[0].prompt == "make this cinematic"
+    assert image_generator.calls[0].reference_image is not None
+    assert image_generator.calls[0].reference_image.caption is None
+    assert image_generator.calls[0].reference_image.telegram_file_unique_id == "uniq-ref"
 
 
 async def test_image_caption_command_rejects_imagen_model_without_provider_call(
@@ -555,15 +651,253 @@ async def test_video_command_queues_generation_job(service_bundle) -> None:
     assert reply.text == "Video generation started. I'll send it here when it's ready."
     assert reply.delivered is True
     assert len(video_generator.submit_calls) == 1
+    assert video_generator.submit_calls[0].provider_hint == "auto"
     assert conversation is not None
 
     stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
     assert len(stored_jobs) == 1
     assert stored_jobs[0].status == "queued"
+    assert stored_jobs[0].provider == "vertex"
     assert stored_jobs[0].prompt_text == "slow cinematic dolly shot through a rainy neon alley"
     assert stored_jobs[0].operation_name == "operations/1"
     assert emitter.sent_texts == [reply.text]
     assert emitter.sent_videos == []
+
+
+async def test_video_ltx_command_submits_runpod_job(service_bundle) -> None:
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
+    video_generator = service_bundle["video_generator"]
+    emitter = FakeResponseEmitter()
+
+    reply = await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=224,
+            command="/video_ltx simple cinematic shot of clouds over a valley",
+            update_id=19,
+        ),
+        responder=emitter,
+    )
+    conversation = await conversations.get_active(224)
+
+    assert reply.text == "Video generation started. I'll send it here when it's ready."
+    assert reply.delivered is True
+    assert len(video_generator.submit_calls) == 1
+    assert video_generator.submit_calls[0].provider_hint == "runpod"
+    assert conversation is not None
+
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    assert len(stored_jobs) == 1
+    assert stored_jobs[0].provider == "runpod"
+    assert stored_jobs[0].model == service.settings.runpod_video_model
+    assert stored_jobs[0].prompt_text == "simple cinematic shot of clouds over a valley"
+
+
+async def test_video_command_uses_saved_video_preferences(service_bundle, monkeypatch) -> None:
+    service = service_bundle["service"]
+    preferences = service_bundle["preferences"]
+    video_generator = service_bundle["video_generator"]
+
+    monkeypatch.setattr("app.domain.services.random.randint", lambda _min, _max: 12345)
+    await preferences.set_preference(
+        chat_id=226,
+        user_id=42,
+        preference_type="video_provider",
+        preset_id="runpod",
+        updated_at=utc_datetime(),
+    )
+    await preferences.set_preference(
+        chat_id=226,
+        user_id=42,
+        preference_type="video_duration",
+        preset_id="duration_8s",
+        updated_at=utc_datetime(),
+    )
+    await preferences.set_preference(
+        chat_id=226,
+        user_id=42,
+        preference_type="video_orientation",
+        preset_id="portrait_9_16",
+        updated_at=utc_datetime(),
+    )
+    await preferences.set_preference(
+        chat_id=226,
+        user_id=42,
+        preference_type="runpod_pipeline",
+        preset_id="two_stage",
+        updated_at=utc_datetime(),
+    )
+    await preferences.set_preference(
+        chat_id=226,
+        user_id=42,
+        preference_type="runpod_quality",
+        preset_id="high",
+        updated_at=utc_datetime(),
+    )
+    await preferences.set_preference(
+        chat_id=226,
+        user_id=42,
+        preference_type="runpod_seed",
+        preset_id="random",
+        updated_at=utc_datetime(),
+    )
+
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=226,
+            command="/video foggy mountain reveal",
+            update_id=21,
+        ),
+    )
+
+    request = video_generator.submit_calls[0]
+    assert request.provider_hint == "runpod"
+    assert request.model == "ltx-2.3-22b"
+    assert request.width == 576
+    assert request.height == 1024
+    assert request.duration_seconds == 8
+    assert request.frame_rate == 24.0
+    assert request.pipeline == "two_stage"
+    assert request.num_inference_steps == 50
+    assert request.seed == 12345
+    assert request.model_locked is True
+
+
+async def test_video_reference_uses_saved_runpod_reference_strength(service_bundle) -> None:
+    service = service_bundle["service"]
+    preferences = service_bundle["preferences"]
+    video_generator = service_bundle["video_generator"]
+
+    await preferences.set_preference(
+        chat_id=229,
+        user_id=42,
+        preference_type="runpod_reference_strength",
+        preset_id="high",
+        updated_at=utc_datetime(),
+    )
+
+    await service.handle_inbound(
+        make_image_command_message(
+            user_id=42,
+            chat_id=229,
+            command="/video_ltx animate the subject",
+            update_id=23,
+        ),
+    )
+
+    request = video_generator.submit_calls[0]
+    assert request.provider_hint == "runpod"
+    assert request.reference_image is not None
+    assert request.image_strength == 0.9
+
+
+async def test_video_reply_photo_command_passes_reference_image_to_submission(
+    service_bundle,
+) -> None:
+    service = service_bundle["service"]
+    video_generator = service_bundle["video_generator"]
+    emitter = FakeResponseEmitter()
+
+    reply = await service.handle_inbound(
+        make_reply_photo_command_message(
+            user_id=42,
+            chat_id=231,
+            command="/video animate this with a slow camera push",
+            update_id=25,
+        ),
+        responder=emitter,
+    )
+
+    assert reply.text == "Video generation started. I'll send it here when it's ready."
+    assert len(video_generator.submit_calls) == 1
+    request = video_generator.submit_calls[0]
+    assert request.provider_hint == "auto"
+    assert request.prompt == "animate this with a slow camera push"
+    assert request.reference_image is not None
+    assert request.reference_image.caption is None
+    assert request.reference_image.telegram_file_unique_id == "uniq-ref"
+
+
+async def test_video_ltx_reply_photo_command_passes_reference_image_to_runpod_submission(
+    service_bundle,
+) -> None:
+    service = service_bundle["service"]
+    video_generator = service_bundle["video_generator"]
+    emitter = FakeResponseEmitter()
+
+    reply = await service.handle_inbound(
+        make_reply_photo_command_message(
+            user_id=42,
+            chat_id=232,
+            command="/video_ltx animate this subject",
+            update_id=26,
+        ),
+        responder=emitter,
+    )
+
+    assert reply.text == "Video generation started. I'll send it here when it's ready."
+    assert len(video_generator.submit_calls) == 1
+    request = video_generator.submit_calls[0]
+    assert request.provider_hint == "runpod"
+    assert request.prompt == "animate this subject"
+    assert request.reference_image is not None
+    assert request.reference_image.caption is None
+    assert request.reference_image.telegram_file_unique_id == "uniq-ref"
+
+
+async def test_image_command_uses_saved_image_preset(service_bundle) -> None:
+    service = service_bundle["service"]
+    preferences = service_bundle["preferences"]
+    image_generator = service_bundle["image_generator"]
+    emitter = FakeResponseEmitter()
+
+    await preferences.set_preference(
+        chat_id=227,
+        user_id=42,
+        preference_type="image",
+        preset_id="imagen_landscape_jpeg",
+        updated_at=utc_datetime(),
+    )
+
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=227,
+            command="/image cinematic desert road at sunrise",
+            update_id=22,
+        ),
+        responder=emitter,
+    )
+
+    request = image_generator.calls[0]
+    assert request.model == "imagen-4.0-fast-generate-001"
+    assert request.aspect_ratio == "16:9"
+    assert request.output_mime_type == "image/jpeg"
+
+
+async def test_chat_message_uses_saved_chat_preset(service_bundle) -> None:
+    service = service_bundle["service"]
+    preferences = service_bundle["preferences"]
+    provider = service_bundle["provider"]
+
+    await preferences.set_preference(
+        chat_id=228,
+        user_id=42,
+        preference_type="chat",
+        preset_id="creative_long",
+        updated_at=utc_datetime(),
+    )
+
+    await service.handle_inbound(
+        make_text_message(user_id=42, chat_id=228, text="give me title ideas")
+    )
+
+    request = provider.calls[0]
+    assert request.temperature == 0.8
+    assert request.max_output_tokens == 1200
 
 
 async def test_video_caption_command_passes_reference_image_to_submission(

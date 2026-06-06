@@ -7,6 +7,7 @@ from app.config import Settings
 
 
 _REPO_ENV_KEYS = (
+    "APP_LOG_FORMAT",
     "BOT_DRAFT_START_DELAY_MS",
     "BOT_DRAFT_UPDATE_INTERVAL_MS",
     "BOT_DRAFT_MIN_CHARS_DELTA",
@@ -16,6 +17,19 @@ _REPO_ENV_KEYS = (
     "OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD",
     "OPENAI_TEMPERATURE",
     "OPENAI_MAX_OUTPUT_TOKENS",
+    "RUNPOD_API_KEY",
+    "RUNPOD_VIDEO_BASE_URL",
+    "RUNPOD_VIDEO_COST_PER_SECOND_USD",
+    "RUNPOD_VIDEO_DURATION_SECONDS",
+    "RUNPOD_VIDEO_ENDPOINT_ID",
+    "RUNPOD_VIDEO_EXECUTION_TIMEOUT_MS",
+    "RUNPOD_VIDEO_FRAME_RATE",
+    "RUNPOD_VIDEO_HEIGHT",
+    "RUNPOD_VIDEO_MODEL",
+    "RUNPOD_VIDEO_REFERENCE_IMAGE_MAX_BYTES",
+    "RUNPOD_VIDEO_SIGNED_URL_TTL_SECONDS",
+    "RUNPOD_VIDEO_TTL_MS",
+    "RUNPOD_VIDEO_WIDTH",
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_ALLOWED_USER_IDS",
     "TELEGRAM_WEBHOOK_DROP_PENDING_UPDATES",
@@ -34,6 +48,7 @@ _REPO_ENV_KEYS = (
     "VERTEX_VIDEO_DURATION_SECONDS",
     "VERTEX_VIDEO_MODEL",
     "VERTEX_VIDEO_OUTPUT_GCS_URI",
+    "VIDEO_PROVIDER_ORDER",
     "VIDEO_JOB_POLL_INTERVAL_SECONDS",
 )
 
@@ -59,12 +74,25 @@ def test_draft_streaming_defaults_are_conservative(tmp_path, monkeypatch) -> Non
     assert settings.bot_draft_start_delay_ms == 750
     assert settings.bot_draft_update_interval_ms == 1200
     assert settings.bot_draft_min_chars_delta == 80
+    assert settings.app_log_format == "text"
     assert settings.telegram_webhook_drop_pending_updates is False
     assert settings.vertex_project_id is None
     assert settings.vertex_location == "us-central1"
     assert settings.vertex_image_model == "imagen-4.0-fast-generate-001"
     assert settings.vertex_video_model == "veo-3.0-fast-generate-001"
     assert settings.vertex_video_duration_seconds == 4
+    assert settings.video_provider_order == ("vertex", "runpod")
+    assert settings.runpod_video_base_url == "https://api.runpod.ai/v2"
+    assert settings.runpod_video_model == "ltx-2.3-22b-distilled-1.1"
+    assert settings.runpod_video_width == 576
+    assert settings.runpod_video_height == 1024
+    assert settings.runpod_video_duration_seconds == 4
+    assert settings.runpod_video_frame_rate == 24.0
+    assert settings.runpod_video_execution_timeout_ms == 1_800_000
+    assert settings.runpod_video_ttl_ms == 7_200_000
+    assert settings.runpod_video_reference_image_max_bytes == 6_000_000
+    assert settings.runpod_video_signed_url_ttl_seconds == 3600
+    assert settings.runpod_video_cost_per_second_usd == 0.0
     assert settings.bot_video_max_bytes == 50 * 1024 * 1024
     assert settings.telegram_video_request_timeout_seconds == 180
     assert settings.video_job_poll_interval_seconds == 15
@@ -74,6 +102,8 @@ def test_draft_streaming_defaults_are_conservative(tmp_path, monkeypatch) -> Non
     assert settings.vertex_video_cost_per_second_usd == 0.0
     assert settings.vertex_image_generation_enabled is False
     assert settings.vertex_video_generation_enabled is False
+    assert settings.runpod_video_generation_enabled is False
+    assert settings.video_generation_enabled is False
 
 
 def test_cost_estimate_rates_can_be_configured(tmp_path, monkeypatch) -> None:
@@ -91,12 +121,47 @@ def test_cost_estimate_rates_can_be_configured(tmp_path, monkeypatch) -> None:
         OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD="1.6",
         VERTEX_IMAGE_COST_PER_IMAGE_USD="0.05",
         VERTEX_VIDEO_COST_PER_SECOND_USD="0.35",
+        RUNPOD_VIDEO_COST_PER_SECOND_USD="0.12",
     )
 
     assert settings.openai_input_cost_per_1m_tokens_usd == 0.4
     assert settings.openai_output_cost_per_1m_tokens_usd == 1.6
     assert settings.vertex_image_cost_per_image_usd == 0.05
     assert settings.vertex_video_cost_per_second_usd == 0.35
+    assert settings.runpod_video_cost_per_second_usd == 0.12
+
+
+def test_app_log_format_accepts_json(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        APP_LOG_FORMAT="json",
+    )
+
+    assert settings.app_log_format == "json"
+
+
+def test_app_log_format_rejects_unknown_values(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    with pytest.raises(ValidationError, match="APP_LOG_FORMAT must be 'text' or 'json'"):
+        Settings(
+            _env_file=None,
+            TELEGRAM_BOT_TOKEN="test-token",
+            OPENAI_API_KEY="test-key",
+            TELEGRAM_ALLOWED_USER_IDS="42",
+            APP_UPDATE_MODE="webhook",
+            TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+            TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+            SQLITE_PATH=str(tmp_path / "bot.db"),
+            APP_LOG_FORMAT="pretty",
+        )
 
 
 def test_vertex_api_key_also_enables_image_generation(tmp_path, monkeypatch) -> None:
@@ -117,6 +182,156 @@ def test_vertex_api_key_also_enables_image_generation(tmp_path, monkeypatch) -> 
     assert settings.vertex_api_key.get_secret_value() == "vertex-test-key"
     assert settings.vertex_image_generation_enabled is True
     assert settings.vertex_video_generation_enabled is True
+    assert settings.video_generation_enabled is True
+
+
+def test_runpod_only_video_config_enables_video_generation(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        VIDEO_PROVIDER_ORDER="runpod",
+        RUNPOD_API_KEY="runpod-test-key",
+        RUNPOD_VIDEO_ENDPOINT_ID="ltx-endpoint",
+    )
+
+    assert settings.vertex_video_generation_enabled is False
+    assert settings.runpod_video_generation_enabled is True
+    assert settings.video_generation_enabled is True
+    assert settings.video_provider_order == ("runpod",)
+
+
+def test_video_provider_order_env_accepts_comma_separated_value(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _clear_repo_env(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "42")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "bot.db"))
+    monkeypatch.setenv("VIDEO_PROVIDER_ORDER", "runpod")
+    monkeypatch.setenv("RUNPOD_API_KEY", "runpod-test-key")
+    monkeypatch.setenv("RUNPOD_VIDEO_ENDPOINT_ID", "ltx-endpoint")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.video_provider_order == ("runpod",)
+    assert settings.video_generation_enabled is True
+
+
+def test_runpod_video_duration_defaults_to_vertex_duration(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        VERTEX_VIDEO_DURATION_SECONDS="3",
+    )
+
+    assert settings.vertex_video_duration_seconds == 3
+    assert settings.runpod_video_duration_seconds == 3
+
+
+def test_runpod_video_native_settings_can_be_configured(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        RUNPOD_VIDEO_WIDTH="1152",
+        RUNPOD_VIDEO_HEIGHT="2048",
+        RUNPOD_VIDEO_DURATION_SECONDS="5",
+        RUNPOD_VIDEO_FRAME_RATE="25",
+        RUNPOD_VIDEO_SIGNED_URL_TTL_SECONDS="900",
+    )
+
+    assert settings.runpod_video_width == 1152
+    assert settings.runpod_video_height == 2048
+    assert settings.runpod_video_duration_seconds == 5
+    assert settings.runpod_video_frame_rate == 25.0
+    assert settings.runpod_video_signed_url_ttl_seconds == 900
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"RUNPOD_VIDEO_WIDTH": "575"}, "RUNPOD_VIDEO_WIDTH must be divisible by 64"),
+        ({"RUNPOD_VIDEO_HEIGHT": "1023"}, "RUNPOD_VIDEO_HEIGHT must be divisible by 64"),
+        ({"RUNPOD_VIDEO_FRAME_RATE": "0"}, "RUNPOD_VIDEO_FRAME_RATE must be greater than zero"),
+    ],
+)
+def test_runpod_video_native_settings_are_validated(
+    tmp_path,
+    monkeypatch,
+    override,
+    message,
+) -> None:
+    _clear_repo_env(monkeypatch)
+    values = {
+        "TELEGRAM_BOT_TOKEN": "test-token",
+        "OPENAI_API_KEY": "test-key",
+        "TELEGRAM_ALLOWED_USER_IDS": "42",
+        "APP_UPDATE_MODE": "webhook",
+        "TELEGRAM_WEBHOOK_URL": "https://bot.example.com/telegram/webhook",
+        "TELEGRAM_WEBHOOK_SECRET_TOKEN": "test-webhook-secret",
+        "SQLITE_PATH": str(tmp_path / "bot.db"),
+    }
+    values.update(override)
+
+    with pytest.raises(ValidationError, match=message):
+        Settings(_env_file=None, **values)
+
+
+def test_video_provider_order_rejects_unknown_providers(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    with pytest.raises(ValidationError, match="VIDEO_PROVIDER_ORDER"):
+        Settings(
+            _env_file=None,
+            TELEGRAM_BOT_TOKEN="test-token",
+            OPENAI_API_KEY="test-key",
+            TELEGRAM_ALLOWED_USER_IDS="42",
+            APP_UPDATE_MODE="webhook",
+            TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+            TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+            SQLITE_PATH=str(tmp_path / "bot.db"),
+            VIDEO_PROVIDER_ORDER="vertex,banana",
+        )
+
+
+def test_runpod_video_requires_api_key_and_endpoint_id(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    with pytest.raises(
+        ValidationError,
+        match="RUNPOD_API_KEY and RUNPOD_VIDEO_ENDPOINT_ID must be configured together",
+    ):
+        Settings(
+            _env_file=None,
+            TELEGRAM_BOT_TOKEN="test-token",
+            OPENAI_API_KEY="test-key",
+            TELEGRAM_ALLOWED_USER_IDS="42",
+            APP_UPDATE_MODE="webhook",
+            TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+            TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+            SQLITE_PATH=str(tmp_path / "bot.db"),
+            RUNPOD_API_KEY="runpod-test-key",
+        )
 
 
 def test_gemini_3_pro_image_requires_global_location_when_enabled(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from app.domain.commands import (
     VIDEO_GENERATION_NOT_CONFIGURED_TEXT,
     VIDEO_GENERATION_QUEUED_TEXT,
     VIDEO_GENERATION_RETRY_TEXT,
+    VIDEO_LTX_PROMPT_REQUIRED_TEXT,
     VIDEO_PROMPT_REQUIRED_TEXT,
     UNSUPPORTED_MESSAGE_TEXT,
     render_help_message,
@@ -42,10 +44,28 @@ from app.domain.models import (
     GeneratedImageResult,
     ImageGenerationRequest,
     InboundMessage,
+    PreferenceType,
     ProviderRequest,
     ServiceReply,
     StreamingProviderEvent,
     VideoGenerationRequest,
+)
+from app.domain.preferences import (
+    SETTINGS_TEXT,
+    UNKNOWN_SETTINGS_TEXT,
+    active_settings_summary,
+    chat_preset_for,
+    image_preset_for,
+    parse_settings_callback,
+    preset_for_preference,
+    runpod_pipeline_preset_for,
+    runpod_quality_preset_for,
+    runpod_reference_strength_preset_for,
+    runpod_seed_preset_for,
+    settings_menu_for,
+    video_duration_preset_for,
+    video_orientation_preset_for,
+    video_provider_preset_for,
 )
 from app.logging import log_kv
 from app.observability import (
@@ -63,6 +83,7 @@ from app.storage.conversations import ConversationRepository
 from app.storage.generation_jobs import GenerationJobRepository
 from app.storage.generated_images import GeneratedImageRepository
 from app.storage.messages import MessageRepository
+from app.storage.preferences import PreferenceRepository
 
 
 def _utcnow() -> datetime:
@@ -112,6 +133,7 @@ class ChatService:
         image_generator: ImageGenerator | None = None,
         generation_jobs: GenerationJobRepository | None = None,
         video_generator: VideoGenerator | None = None,
+        preferences: PreferenceRepository | None = None,
     ) -> None:
         self.settings = settings
         self.conversations = conversations
@@ -121,6 +143,7 @@ class ChatService:
         self.image_generator = image_generator
         self.generation_jobs = generation_jobs
         self.video_generator = video_generator
+        self.preferences = preferences
         self.logger = logging.getLogger("app.domain.services")
         self._active_runs: dict[int, _ActiveRun] = {}
         self._active_runs_lock = asyncio.Lock()
@@ -297,8 +320,105 @@ class ChatService:
         )
         return ServiceReply(text=GENERIC_FAILURE_TEXT, error_type=type(error).__name__)
 
+    async def handle_settings_callback(
+        self,
+        *,
+        chat_id: int,
+        user_id: int,
+        callback_data: str | None,
+    ) -> ServiceReply:
+        if not self._is_allowed(user_id):
+            self.logger.info(
+                log_kv(
+                    "unauthorized_settings_callback",
+                    chat_id=chat_id,
+                    user_id=user_id,
+                )
+            )
+            return ServiceReply(
+                text=ACCESS_DENIED_TEXT,
+                error_type="UnauthorizedUserError",
+            )
+
+        parsed = parse_settings_callback(callback_data)
+        if parsed is None:
+            return ServiceReply(text=UNKNOWN_SETTINGS_TEXT, error_type="ValidationError")
+
+        action, preference_type, preset_id = parsed
+        if action == "set" and preference_type is not None and preset_id is not None:
+            if self.preferences is not None:
+                await self.preferences.set_preference(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    preference_type=preference_type,
+                    preset_id=preset_id,
+                    updated_at=_utcnow(),
+                )
+            preferences = await self._preferences_for_user(
+                chat_id=chat_id,
+                user_id=user_id,
+            )
+            return ServiceReply(
+                text=active_settings_summary(preferences=preferences),
+                settings_menu=settings_menu_for(
+                    preference_type=preference_type,
+                    active_preset_id=preset_id,
+                ),
+            )
+
+        preferences = await self._preferences_for_user(
+            chat_id=chat_id,
+            user_id=user_id,
+        )
+        active_preset_id = (
+            preferences[preference_type].preset_id
+            if preference_type is not None and preferences.get(preference_type)
+            else None
+        )
+        return ServiceReply(
+            text=(
+                SETTINGS_TEXT
+                if preference_type is None
+                else active_settings_summary(preferences=preferences)
+            ),
+            settings_menu=settings_menu_for(
+                preference_type=preference_type,
+                active_preset_id=active_preset_id,
+            ),
+        )
+
     def _is_allowed(self, user_id: int) -> bool:
         return user_id in self.settings.allowed_user_ids
+
+    async def _preferences_for_user(
+        self,
+        *,
+        chat_id: int,
+        user_id: int,
+    ) -> dict[PreferenceType, object]:
+        if self.preferences is None:
+            return {}
+        return await self.preferences.list_for_user(chat_id=chat_id, user_id=user_id)
+
+    async def _preference_for_user(
+        self,
+        *,
+        chat_id: int,
+        user_id: int,
+        preference_type: PreferenceType,
+    ):
+        if self.preferences is None:
+            return None
+        preference = await self.preferences.get_preference(
+            chat_id=chat_id,
+            user_id=user_id,
+            preference_type=preference_type,
+        )
+        if preference is None:
+            return None
+        if preset_for_preference(preference_type, preference.preset_id) is None:
+            return None
+        return preference
 
     async def _begin_run(self, chat_id: int) -> _ActiveRun:
         new_run = _ActiveRun()
@@ -340,7 +460,7 @@ class ChatService:
                 error_type=reply.error_type,
                 suppressed=True,
             )
-        await responder.send_text(reply.text)
+        await responder.send_text(reply.text, settings_menu=reply.settings_menu)
         reply.delivered = True
         return reply
 
@@ -369,9 +489,25 @@ class ChatService:
                 chat_model=self.settings.openai_model,
                 image_generation_enabled=self.settings.vertex_image_generation_enabled,
                 image_model=self.settings.vertex_image_model,
-                video_generation_enabled=self.settings.vertex_video_generation_enabled,
-                video_model=self.settings.vertex_video_model,
+                video_generation_enabled=self.settings.video_generation_enabled,
+                video_model=self._video_status_model(),
                 memory_enabled=self.settings.bot_history_max_turns > 0,
+            )
+            preferences = await self._preferences_for_user(
+                chat_id=message.chat_id,
+                user_id=message.user_id,
+            )
+            reply_text = f"{reply_text}\n\n{active_settings_summary(preferences=preferences)}"
+        elif command == "/settings":
+            preferences = await self._preferences_for_user(
+                chat_id=message.chat_id,
+                user_id=message.user_id,
+            )
+            reply_text = active_settings_summary(preferences=preferences)
+            await self._persist_command_exchange(conversation, message, reply_text)
+            return ServiceReply(
+                text=reply_text,
+                settings_menu=settings_menu_for(),
             )
         elif command == "/image":
             return await self._handle_image_command(
@@ -380,7 +516,7 @@ class ChatService:
                 responder=responder,
                 active_run=active_run,
             )
-        elif command == "/video":
+        elif command in {"/video", "/video_ltx"}:
             return await self._handle_video_command(
                 conversation=conversation,
                 message=message,
@@ -426,9 +562,29 @@ class ChatService:
             await self.conversations.touch(conversation.id)
             return ServiceReply(text=IMAGE_GENERATION_NOT_CONFIGURED_TEXT)
 
-        if message.image is not None and not is_gemini_image_model(
-            self.settings.vertex_image_model
-        ):
+        image_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="image",
+        )
+        image_preset = (
+            image_preset_for(image_preference.preset_id)
+            if image_preference is not None
+            else None
+        )
+        image_model = image_preset.model if image_preset else self.settings.vertex_image_model
+        image_aspect_ratio = (
+            image_preset.aspect_ratio
+            if image_preset
+            else self.settings.vertex_image_aspect_ratio
+        )
+        image_output_mime_type = (
+            image_preset.output_mime_type
+            if image_preset
+            else self.settings.vertex_image_output_mime_type
+        )
+
+        if message.image is not None and not is_gemini_image_model(image_model):
             await self._persist_command_reply(
                 conversation,
                 IMAGE_REFERENCE_REQUIRES_GEMINI_TEXT,
@@ -442,9 +598,9 @@ class ChatService:
                     chat_id=message.chat_id,
                     user_id=message.user_id,
                     prompt=prompt,
-                    model=self.settings.vertex_image_model,
-                    aspect_ratio=self.settings.vertex_image_aspect_ratio,
-                    output_mime_type=self.settings.vertex_image_output_mime_type,
+                    model=image_model,
+                    aspect_ratio=image_aspect_ratio,
+                    output_mime_type=image_output_mime_type,
                     reference_image=message.image,
                 )
             )
@@ -456,14 +612,14 @@ class ChatService:
                     chat_id=message.chat_id,
                     user_id=message.user_id,
                     provider="vertex",
-                    model=self.settings.vertex_image_model,
+                    model=image_model,
                     location=self.settings.vertex_location,
                     api_method=image_generation_api_method(
-                        self.settings.vertex_image_model
+                        image_model
                     ),
                     required_location=(
                         "global"
-                        if requires_global_location(self.settings.vertex_image_model)
+                        if requires_global_location(image_model)
                         else None
                     ),
                 ),
@@ -491,7 +647,7 @@ class ChatService:
         usage_fields.update(
             {
                 "api_method": image_generation_api_method(
-                    self.settings.vertex_image_model
+                    image_model
                 ),
                 "mime_type": generated_image.mime_type,
                 "telegram_message_id": sent_photo.telegram_message_id,
@@ -509,12 +665,17 @@ class ChatService:
     ) -> ServiceReply:
         prompt = self._extract_video_prompt(message)
         if prompt is None:
+            prompt_required_text = (
+                VIDEO_LTX_PROMPT_REQUIRED_TEXT
+                if (message.command or "").lower() == "/video_ltx"
+                else VIDEO_PROMPT_REQUIRED_TEXT
+            )
             await self._persist_command_exchange(
                 conversation,
                 message,
-                VIDEO_PROMPT_REQUIRED_TEXT,
+                prompt_required_text,
             )
-            return ServiceReply(text=VIDEO_PROMPT_REQUIRED_TEXT)
+            return ServiceReply(text=prompt_required_text)
 
         if self.video_generator is None or self.generation_jobs is None:
             await self._persist_command_exchange(
@@ -525,10 +686,152 @@ class ChatService:
             return ServiceReply(text=VIDEO_GENERATION_NOT_CONFIGURED_TEXT)
 
         await self._persist_user_command_message(conversation, message)
+        video_provider_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="video_provider",
+        )
+        video_provider_preset = (
+            video_provider_preset_for(video_provider_preference.preset_id)
+            if video_provider_preference is not None
+            else None
+        )
+        duration_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="video_duration",
+        )
+        duration_preset = (
+            video_duration_preset_for(duration_preference.preset_id)
+            if duration_preference is not None
+            else None
+        )
+        orientation_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="video_orientation",
+        )
+        orientation_preset = (
+            video_orientation_preset_for(orientation_preference.preset_id)
+            if orientation_preference is not None
+            else None
+        )
+        pipeline_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="runpod_pipeline",
+        )
+        pipeline_preset = (
+            runpod_pipeline_preset_for(pipeline_preference.preset_id)
+            if pipeline_preference is not None
+            else None
+        )
+        quality_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="runpod_quality",
+        )
+        quality_preset = (
+            runpod_quality_preset_for(quality_preference.preset_id)
+            if quality_preference is not None
+            else None
+        )
+        seed_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="runpod_seed",
+        )
+        seed_preset = (
+            runpod_seed_preset_for(seed_preference.preset_id)
+            if seed_preference is not None
+            else None
+        )
+        reference_strength_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="runpod_reference_strength",
+        )
+        reference_strength_preset = (
+            runpod_reference_strength_preset_for(
+                reference_strength_preference.preset_id,
+            )
+            if reference_strength_preference is not None
+            else None
+        )
+        command_forces_runpod = (message.command or "").lower() == "/video_ltx"
+        provider_hint = (
+            "runpod"
+            if command_forces_runpod
+            else (
+                video_provider_preset.provider_hint
+                if video_provider_preset is not None
+                else "auto"
+            )
+        )
+        requested_provider = "runpod" if provider_hint == "runpod" else "vertex"
+        requested_pipeline = None
+        requested_num_inference_steps = None
+        requested_seed = None
+        requested_image_strength = None
+        model_locked = False
+        if requested_provider == "runpod":
+            if pipeline_preset is not None:
+                requested_pipeline = pipeline_preset.pipeline
+                model_locked = True
+            if requested_pipeline == "two_stage" and quality_preset is not None:
+                requested_num_inference_steps = quality_preset.num_inference_steps
+            if seed_preset is not None:
+                requested_seed = (
+                    random.randint(0, 2_147_483_647)
+                    if seed_preset.randomize
+                    else seed_preset.seed
+                )
+            if message.image is not None and reference_strength_preset is not None:
+                requested_image_strength = reference_strength_preset.image_strength
+
+        requested_model = (
+            pipeline_preset.model
+            if requested_provider == "runpod" and pipeline_preset is not None
+            else self._video_model_for_provider(requested_provider)
+        )
+        requested_aspect_ratio = (
+            orientation_preset.vertex_aspect_ratio
+            if orientation_preset is not None
+            else self.settings.vertex_video_aspect_ratio
+        )
+        requested_duration_seconds = (
+            duration_preset.duration_seconds
+            if duration_preset is not None
+            else self._video_duration_for_provider(requested_provider)
+        )
+        requested_cost_per_second = self._video_cost_for_provider(requested_provider)
+        requested_width = (
+            orientation_preset.runpod_width
+            if orientation_preset is not None and requested_provider == "runpod"
+            else (
+                self.settings.runpod_video_width
+                if requested_provider == "runpod"
+                else None
+            )
+        )
+        requested_height = (
+            orientation_preset.runpod_height
+            if orientation_preset is not None and requested_provider == "runpod"
+            else (
+                self.settings.runpod_video_height
+                if requested_provider == "runpod"
+                else None
+            )
+        )
+        requested_frame_rate = (
+            self.settings.runpod_video_frame_rate
+            if requested_provider == "runpod"
+            else None
+        )
         usage_fields = estimate_video_usage(
             prompt=prompt,
-            duration_seconds=self.settings.vertex_video_duration_seconds,
-            cost_per_second_usd=self.settings.vertex_video_cost_per_second_usd,
+            duration_seconds=requested_duration_seconds,
+            cost_per_second_usd=requested_cost_per_second,
         )
         self.logger.info(
             log_kv(
@@ -536,10 +839,17 @@ class ChatService:
                 update_id=message.update_id,
                 chat_id=message.chat_id,
                 user_id=message.user_id,
-                provider="vertex",
-                model=self.settings.vertex_video_model,
-                aspect_ratio=self.settings.vertex_video_aspect_ratio,
+                provider=requested_provider,
+                provider_hint=provider_hint,
+                model=requested_model,
+                aspect_ratio=requested_aspect_ratio,
                 output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
+                runpod_width=requested_width,
+                runpod_height=requested_height,
+                runpod_pipeline=requested_pipeline,
+                runpod_num_inference_steps=requested_num_inference_steps,
+                runpod_seed=requested_seed,
+                runpod_image_strength=requested_image_strength,
                 **usage_fields,
             )
         )
@@ -548,11 +858,20 @@ class ChatService:
                 chat_id=message.chat_id,
                 user_id=message.user_id,
                 prompt=prompt,
-                model=self.settings.vertex_video_model,
-                aspect_ratio=self.settings.vertex_video_aspect_ratio,
-                duration_seconds=self.settings.vertex_video_duration_seconds,
+                model=requested_model,
+                aspect_ratio=requested_aspect_ratio,
+                duration_seconds=requested_duration_seconds,
                 output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
                 reference_image=message.image,
+                provider_hint=provider_hint,
+                width=requested_width,
+                height=requested_height,
+                frame_rate=requested_frame_rate,
+                pipeline=requested_pipeline,
+                num_inference_steps=requested_num_inference_steps,
+                seed=requested_seed,
+                image_strength=requested_image_strength,
+                model_locked=model_locked,
             )
         )
         self.logger.info(
@@ -575,11 +894,16 @@ class ChatService:
             provider=submitted_job.provider,
             model=submitted_job.raw_model,
             operation_name=submitted_job.operation_name,
-            duration_seconds=self.settings.vertex_video_duration_seconds,
+            duration_seconds=requested_duration_seconds,
             created_at=message.sent_at,
         )
         await self._persist_command_reply(conversation, VIDEO_GENERATION_QUEUED_TEXT)
         await self.conversations.touch(conversation.id)
+        usage_fields = estimate_video_usage(
+            prompt=prompt,
+            duration_seconds=requested_duration_seconds,
+            cost_per_second_usd=self._video_cost_for_provider(submitted_job.provider),
+        )
         return ServiceReply(text=VIDEO_GENERATION_QUEUED_TEXT, usage_fields=usage_fields)
 
     async def _persist_command_exchange(
@@ -627,11 +951,36 @@ class ChatService:
         active_run: _ActiveRun,
     ) -> ServiceReply:
         conversation = await self.conversations.get_or_create_active(message.chat_id)
+        chat_preference = await self._preference_for_user(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            preference_type="chat",
+        )
+        chat_preset = (
+            chat_preset_for(chat_preference.preset_id)
+            if chat_preference is not None
+            else None
+        )
+        history_max_turns = (
+            chat_preset.history_max_turns
+            if chat_preset is not None and chat_preset.history_max_turns is not None
+            else self.settings.bot_history_max_turns
+        )
+        temperature = (
+            chat_preset.temperature
+            if chat_preset is not None and chat_preset.temperature is not None
+            else self.settings.openai_temperature
+        )
+        max_output_tokens = (
+            chat_preset.max_output_tokens
+            if chat_preset is not None and chat_preset.max_output_tokens is not None
+            else self.settings.openai_max_output_tokens
+        )
         history = []
-        if self.settings.bot_history_max_turns > 0:
+        if history_max_turns > 0:
             history = await self.messages.list_recent_history(
                 conversation_id=conversation.id,
-                limit=self.settings.bot_history_max_turns,
+                limit=history_max_turns,
             )
 
         await self.messages.add_user_message(
@@ -651,8 +1000,8 @@ class ChatService:
             user_message=message.text,
             image=message.image,
             model=self.settings.openai_model,
-            temperature=self.settings.openai_temperature,
-            max_output_tokens=self.settings.openai_max_output_tokens,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
         )
 
         draft_session: DraftSession | None = None
@@ -848,16 +1197,50 @@ class ChatService:
         if self._is_image_command(message):
             return ("vertex", self.settings.vertex_image_model)
         if self._is_video_command(message):
-            return ("vertex", self.settings.vertex_video_model)
+            provider = (
+                "runpod"
+                if (message.command or "").lower() == "/video_ltx"
+                else "vertex"
+            )
+            return (provider, self._video_model_for_provider(provider))
         if message.message_type != "command":
             return ("openai", self.settings.openai_model)
         return (None, None)
 
     def _is_image_command(self, message: InboundMessage) -> bool:
-        return message.message_type == "command" and (message.command or "").lower() == "/image"
+        return (
+            message.message_type == "command"
+            and (message.command or "").lower() == "/image"
+        )
 
     def _is_video_command(self, message: InboundMessage) -> bool:
-        return message.message_type == "command" and (message.command or "").lower() == "/video"
+        return message.message_type == "command" and (message.command or "").lower() in {
+            "/video",
+            "/video_ltx",
+        }
+
+    def _video_model_for_provider(self, provider: str) -> str:
+        if provider == "runpod":
+            return self.settings.runpod_video_model
+        return self.settings.vertex_video_model
+
+    def _video_cost_for_provider(self, provider: str) -> float:
+        if provider == "runpod":
+            return self.settings.runpod_video_cost_per_second_usd
+        return self.settings.vertex_video_cost_per_second_usd
+
+    def _video_duration_for_provider(self, provider: str) -> int | None:
+        if provider == "runpod":
+            return self.settings.runpod_video_duration_seconds
+        return self.settings.vertex_video_duration_seconds
+
+    def _video_status_model(self) -> str:
+        enabled_models: list[str] = []
+        if self.settings.vertex_video_generation_enabled:
+            enabled_models.append(f"vertex:{self.settings.vertex_video_model}")
+        if self.settings.runpod_video_generation_enabled:
+            enabled_models.append(f"runpod:{self.settings.runpod_video_model}")
+        return ", ".join(enabled_models) or self.settings.vertex_video_model
 
     def _drafts_enabled(
         self,

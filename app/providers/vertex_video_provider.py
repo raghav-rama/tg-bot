@@ -7,7 +7,11 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from app.domain.errors import ProviderTimeoutError, ProviderUpstreamError
+from app.domain.errors import (
+    ProviderSafetyError,
+    ProviderTimeoutError,
+    ProviderUpstreamError,
+)
 from app.domain.models import (
     GeneratedVideoResult,
     ImageInput,
@@ -147,6 +151,10 @@ class VertexVideoProvider:
                 error_code = getattr(exc, "code", None)
                 if error_code in {408, 504}:
                     raise ProviderTimeoutError("Vertex video generation timed out") from exc
+                if self._is_safety_error(exc):
+                    raise ProviderSafetyError(
+                        "Vertex video generation was rejected by provider safety policy"
+                    ) from exc
                 raise ProviderUpstreamError("Vertex video generation failed") from exc
             self.logger.exception(
                 log_kv(
@@ -463,6 +471,25 @@ class VertexVideoProvider:
             except Exception:
                 continue
         return None
+
+    def _is_safety_error(self, exc: Exception) -> bool:
+        text = " ".join(
+            part
+            for part in (
+                self._error_message(exc),
+                self._error_details(exc),
+            )
+            if part
+        ).lower()
+        safety_markers = (
+            "safety",
+            "unsafe",
+            "responsible ai",
+            "policy violation",
+            "blocked",
+            "prohibited",
+        )
+        return any(marker in text for marker in safety_markers)
 
     def _download_video_from_uri(self, uri: str) -> tuple[bytes, str | None, int | None]:
         if not uri.startswith("gs://"):

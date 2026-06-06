@@ -77,7 +77,7 @@ class VideoJobWorker:
             await asyncio.sleep(self.settings.video_job_poll_interval_seconds)
 
     async def _process_job(self, job: StoredGenerationJob) -> None:
-        self.logger.info(
+        self.logger.debug(
             log_kv(
                 "video_job_processing_started",
                 job_id=job.id,
@@ -104,6 +104,7 @@ class VideoJobWorker:
                     operation_name=job.operation_name,
                     prompt=job.prompt_text,
                     model=job.model,
+                    provider=job.provider,
                 )
             )
         except (ProviderTimeoutError, ProviderUpstreamError) as exc:
@@ -304,7 +305,9 @@ class VideoJobWorker:
         completed_usage_fields = estimate_video_usage(
             prompt=job.prompt_text,
             duration_seconds=delivered_duration_seconds,
-            cost_per_second_usd=self.settings.vertex_video_cost_per_second_usd,
+            cost_per_second_usd=self._video_cost_for_provider(
+                generated_video.provider or job.provider
+            ),
         )
         self.logger.info(
             log_kv(
@@ -363,3 +366,8 @@ class VideoJobWorker:
     def _format_delivery_failure_reason(exc: Exception) -> str:
         reason = f"Telegram video delivery failed: {type(exc).__name__}: {exc}"
         return reason[:500]
+
+    def _video_cost_for_provider(self, provider: str) -> float:
+        if provider == "runpod":
+            return self.settings.runpod_video_cost_per_second_usd
+        return self.settings.vertex_video_cost_per_second_usd

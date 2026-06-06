@@ -25,6 +25,10 @@ class ProviderUpstreamError(BotError):
     """Raised when the provider returns an upstream failure."""
 
 
+class ProviderSafetyError(ProviderUpstreamError):
+    """Raised when a provider rejects a request for safety policy reasons."""
+
+
 class DraftDeliveryError(BotError):
     """Raised when a partial Telegram draft cannot be delivered."""
 

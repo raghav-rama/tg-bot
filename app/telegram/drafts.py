@@ -6,11 +6,17 @@ import logging
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.domain.errors import DraftRateLimitedError
 from app.domain.interfaces import DraftSession, ResponseEmitter
-from app.domain.models import GeneratedImageResult, GeneratedVideoResult, SentPhoto, SentVideo
+from app.domain.models import (
+    GeneratedImageResult,
+    GeneratedVideoResult,
+    SentPhoto,
+    SentVideo,
+    SettingsMenu,
+)
 from app.logging import log_kv
 from app.telegram.formatting import render_telegram_html
 
@@ -75,13 +81,19 @@ class TelegramResponseEmitter:
         self.video_request_timeout_seconds = video_request_timeout_seconds
         self.logger = logging.getLogger("app.telegram.drafts")
 
-    async def send_text(self, text: str) -> None:
+    async def send_text(
+        self,
+        text: str,
+        settings_menu: SettingsMenu | None = None,
+    ) -> None:
         formatted_text = render_telegram_html(text)
+        reply_markup = _settings_menu_markup(settings_menu)
         try:
             await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=formatted_text,
                 parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup,
             )
         except TelegramBadRequest as exc:
             self.logger.warning(
@@ -96,6 +108,7 @@ class TelegramResponseEmitter:
                 chat_id=self.chat_id,
                 text=text,
                 parse_mode=None,
+                reply_markup=reply_markup,
             )
 
     async def send_photo(self, image: GeneratedImageResult) -> SentPhoto:
@@ -158,3 +171,20 @@ class TelegramResponseEmitter:
             chat_id=self.chat_id,
             draft_id=draft_id,
         )
+
+
+def _settings_menu_markup(settings_menu: SettingsMenu | None) -> InlineKeyboardMarkup | None:
+    if settings_menu is None:
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=button.text,
+                    callback_data=button.callback_data,
+                )
+                for button in row
+            ]
+            for row in settings_menu.rows
+        ]
+    )

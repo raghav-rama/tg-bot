@@ -12,10 +12,11 @@ from app.storage.db import Database
 from app.telegram.polling import TelegramRuntime
 
 
-def test_healthz_is_live_when_settings_are_missing(monkeypatch) -> None:
+def test_healthz_is_live_when_settings_are_missing(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_ALLOWED_USER_IDS", raising=False)
+    monkeypatch.chdir(tmp_path)
 
     with TestClient(create_app()) as client:
         health_response = client.get("/healthz")
@@ -63,6 +64,7 @@ async def test_polling_runtime_leaves_process_signals_to_uvicorn(monkeypatch) ->
         {
             "handle_signals": False,
             "close_bot_session": False,
+            "allowed_updates": ["message", "callback_query"],
         }
     ]
 
@@ -90,7 +92,9 @@ def test_readyz_is_healthy_when_webhook_mode_is_configured(
         url: str,
         secret_token: str,
         drop_pending_updates: bool = False,
+        allowed_updates: list[str] | None = None,
     ) -> None:
+        assert allowed_updates == ["message", "callback_query"]
         self._webhook_configured = True
         self._webhook_url = url
         self._last_error = None
@@ -111,6 +115,7 @@ def test_readyz_reports_webhook_startup_failure(monkeypatch, tmp_path) -> None:
         url: str,
         secret_token: str,
         drop_pending_updates: bool = False,
+        allowed_updates: list[str] | None = None,
     ) -> None:
         raise RuntimeError("webhook setup failed")
 
@@ -136,6 +141,7 @@ def test_webhook_startup_failure_closes_initialized_resources(
         url: str,
         secret_token: str,
         drop_pending_updates: bool = False,
+        allowed_updates: list[str] | None = None,
     ) -> None:
         raise RuntimeError("webhook setup failed")
 

@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-SUPPORTED_COMMANDS = {"/start", "/help", "/status", "/reset", "/image", "/video"}
+SUPPORTED_COMMANDS = {
+    "/start",
+    "/help",
+    "/status",
+    "/reset",
+    "/settings",
+    "/image",
+    "/video",
+    "/video_ltx",
+}
 
 ACCESS_DENIED_TEXT = "Access denied."
 UNSUPPORTED_MESSAGE_TEXT = (
@@ -24,6 +33,9 @@ IMAGE_GENERATION_RETRY_TEXT = (
 )
 VIDEO_PROMPT_REQUIRED_TEXT = (
     "Use /video followed by a prompt, for example: /video slow cinematic dolly shot through a neon alley"
+)
+VIDEO_LTX_PROMPT_REQUIRED_TEXT = (
+    "Use /video_ltx followed by a prompt, for example: /video_ltx slow cinematic dolly shot through a neon alley"
 )
 VIDEO_GENERATION_NOT_CONFIGURED_TEXT = "Video generation is not configured right now."
 VIDEO_GENERATION_QUEUED_TEXT = (
@@ -51,8 +63,10 @@ def render_start_message() -> str:
         "/help\n"
         "/status\n"
         "/reset\n"
+        "/settings\n"
         "/image <prompt>\n"
-        "/video <prompt>"
+        "/video <prompt>\n"
+        "/video_ltx <prompt>"
     )
 
 
@@ -63,8 +77,10 @@ def render_help_message() -> str:
         "/help - show this help message\n"
         "/status - show runtime status\n"
         "/reset - start a fresh conversation for this chat\n"
+        "/settings - tune video, image, and chat presets\n"
         "/image <prompt> - generate one image with Vertex AI\n"
-        "/video <prompt> - queue one short video with Vertex AI\n\n"
+        "/video <prompt> - queue one short video with Vertex AI and Runpod fallback\n"
+        "/video_ltx <prompt> - queue one short video directly with Runpod LTX\n\n"
         "Supported inputs:\n"
         "- text messages\n"
         "- one photo with an optional caption\n\n"

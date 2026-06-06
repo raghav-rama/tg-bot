@@ -8,6 +8,20 @@ MessageType = Literal["text", "image", "command"]
 Role = Literal["user", "assistant"]
 ChatType = Literal["private", "group", "supergroup", "channel"]
 GenerationJobStatus = Literal["queued", "running", "completed", "failed"]
+VideoProviderName = Literal["vertex", "runpod"]
+VideoProviderHint = Literal["auto", "vertex", "runpod"]
+PreferenceType = Literal[
+    "video",
+    "video_provider",
+    "video_duration",
+    "video_orientation",
+    "runpod_pipeline",
+    "runpod_quality",
+    "runpod_seed",
+    "runpod_reference_strength",
+    "image",
+    "chat",
+]
 
 
 @dataclass(slots=True)
@@ -188,6 +202,15 @@ class VideoGenerationRequest:
     duration_seconds: int | None
     output_gcs_uri: str | None
     reference_image: ImageInput | None = None
+    provider_hint: VideoProviderHint = "auto"
+    width: int | None = None
+    height: int | None = None
+    frame_rate: float | None = None
+    pipeline: str | None = None
+    num_inference_steps: int | None = None
+    seed: int | None = None
+    image_strength: float | None = None
+    model_locked: bool = False
 
 
 @dataclass(slots=True)
@@ -195,6 +218,7 @@ class VideoGenerationPollRequest:
     operation_name: str
     prompt: str
     model: str
+    provider: VideoProviderName
 
 
 @dataclass(slots=True)
@@ -267,9 +291,30 @@ class StoredGenerationJob:
 
 
 @dataclass(slots=True)
+class UserPreference:
+    chat_id: int
+    user_id: int
+    preference_type: PreferenceType
+    preset_id: str
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class SettingsButton:
+    text: str
+    callback_data: str
+
+
+@dataclass(frozen=True, slots=True)
+class SettingsMenu:
+    rows: tuple[tuple[SettingsButton, ...], ...]
+
+
+@dataclass(slots=True)
 class ServiceReply:
     text: str
     error_type: str | None = None
     delivered: bool = False
     suppressed: bool = False
     usage_fields: dict[str, Any] = field(default_factory=dict)
+    settings_menu: SettingsMenu | None = None

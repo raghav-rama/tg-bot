@@ -82,6 +82,7 @@ async def test_response_emitter_sends_formatted_html() -> None:
             "chat_id": 123,
             "text": "<b>Video idea</b>\n<b>Topic:</b> great hooks",
             "parse_mode": ParseMode.HTML,
+            "reply_markup": None,
         }
     ]
 
@@ -97,11 +98,13 @@ async def test_response_emitter_falls_back_to_plain_text_on_bad_request() -> Non
             "chat_id": 456,
             "text": "<b>Video idea</b>\n<b>Topic:</b> great hooks",
             "parse_mode": ParseMode.HTML,
+            "reply_markup": None,
         },
         {
             "chat_id": 456,
             "text": "## Video idea\n**Topic:** great hooks",
             "parse_mode": None,
+            "reply_markup": None,
         },
     ]
 

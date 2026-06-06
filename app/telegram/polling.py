@@ -8,6 +8,8 @@ from aiogram import Bot, Dispatcher
 from app.logging import log_kv
 from app.telegram.handlers import TelegramUpdateProcessor, build_router
 
+ALLOWED_UPDATES = ["message", "callback_query"]
+
 
 class TelegramRuntime:
     def __init__(self, *, token: str, processor: TelegramUpdateProcessor) -> None:
@@ -50,12 +52,14 @@ class TelegramRuntime:
         url: str,
         secret_token: str,
         drop_pending_updates: bool = False,
+        allowed_updates: list[str] | None = None,
     ) -> None:
         try:
             await self.bot.set_webhook(
                 url=url,
                 secret_token=secret_token,
                 drop_pending_updates=drop_pending_updates,
+                allowed_updates=allowed_updates or ALLOWED_UPDATES,
             )
             webhook_info = await self.bot.get_webhook_info()
             if webhook_info.url != url:
@@ -113,6 +117,7 @@ class TelegramRuntime:
                 self.bot,
                 handle_signals=False,
                 close_bot_session=False,
+                allowed_updates=ALLOWED_UPDATES,
             )
         except asyncio.CancelledError:
             raise
