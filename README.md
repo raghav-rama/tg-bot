@@ -1,6 +1,6 @@
 # tg-bot
 
-Private Telegram bot built with FastAPI, SQLite, OpenAI chat, and Vertex AI image/video generation.
+Private Telegram bot built with FastAPI, SQLite, OpenAI chat, Vertex AI image/video generation, and Runpod LTX video fallback.
 
 ## Status
 
@@ -14,8 +14,10 @@ Implemented today:
 - text chat and single-photo understanding through OpenAI
 - Telegram draft streaming for long-running text replies
 - `/image <prompt>` generation through Vertex AI and Telegram `sendPhoto`
-- `/video <prompt>` queued generation through Vertex AI, SQLite-backed jobs, background polling, and Telegram `sendVideo`
-- photo captions that start with `/image <prompt>` or `/video <prompt>` use the photo as a transient reference image for generation
+- `/video <prompt>` queued generation through Vertex AI with Runpod LTX fallback on Vertex safety rejections
+- `/video_ltx <prompt>` queued generation directly through Runpod LTX for manual testing
+- SQLite-backed video jobs, background polling, and Telegram `sendVideo`
+- photo captions that start with `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>` use the photo as a transient reference image for generation
 - log-only usage observability with optional config-driven cost estimates for chat, image, and video generation
 - health and readiness endpoints plus automated tests
 
@@ -35,8 +37,8 @@ Inbound inputs:
 
 - plain text messages
 - one photo with an optional caption
-- one photo with a caption that starts with `/image <prompt>` or `/video <prompt>`
-- commands: `/start`, `/help`, `/status`, `/reset`, `/image`, `/video`
+- one photo with a caption that starts with `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>`
+- commands: `/start`, `/help`, `/status`, `/reset`, `/image`, `/video`, `/video_ltx`
 
 Outbound outputs:
 
@@ -52,10 +54,11 @@ Current constraints:
 - webhook mode requires a public HTTPS URL and validates `X-Telegram-Bot-Api-Secret-Token`
 - raw generated image and video bytes are not persisted in SQLite
 - raw reference photo bytes are transient request inputs and are not persisted in SQLite
-- live Telegram and Vertex verification still depends on real credentials and manual runtime checks
-- generated video bytes remain transient in memory only, and URI-backed assets should rely on external bucket lifecycle cleanup
+- live Telegram, Vertex, and Runpod verification still depends on real credentials and manual runtime checks
+- generated video bytes remain transient in memory only, and URI-backed assets should rely on external bucket or object-storage lifecycle cleanup
 - Gemini image models use a separate preview path from Imagen; `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`
 - `/image` with a reference photo requires a Gemini image model; Imagen remains prompt-to-image only
+- `/video` falls back to Runpod only for classified Vertex safety rejections, not for timeout, quota, or generic upstream failures
 
 ## Architecture At A Glance
 
@@ -64,7 +67,7 @@ The runtime is split so Telegram transport stays separate from domain and provid
 - `app/api/`: `healthz`, `readyz`, and webhook ingestion
 - `app/telegram/`: polling runtime, handlers, normalization, formatting, media delivery, and drafts
 - `app/domain/`: commands, models, interfaces, and orchestration in `ChatService`
-- `app/providers/`: OpenAI chat plus Vertex image and video adapters
+- `app/providers/`: OpenAI chat plus Vertex image/video, Runpod video, and video provider routing adapters
 - `app/storage/`: SQLite schema and repositories for conversations, messages, generated images, and generation jobs
 - `app/workers/`: background polling worker for queued video jobs
 
@@ -74,7 +77,8 @@ The runtime is split so Telegram transport stays separate from domain and provid
 - `uv` for dependency management
 - a Telegram bot token
 - an OpenAI API key for chat replies
-- Vertex configuration for `/image` and `/video`
+- Vertex configuration for `/image` and default `/video`
+- optional Runpod configuration for `/video` fallback and `/video_ltx`
 
 ## Quick Start
 
@@ -124,6 +128,22 @@ VERTEX_API_KEY=your-vertex-api-key
 # Optional log-only cost estimates; keep unset or 0 to disable.
 # VERTEX_IMAGE_COST_PER_IMAGE_USD=0
 # VERTEX_VIDEO_COST_PER_SECOND_USD=0
+
+# Optional Runpod LTX fallback for /video and manual /video_ltx
+# VIDEO_PROVIDER_ORDER=vertex,runpod
+# RUNPOD_API_KEY=your-runpod-api-key
+# RUNPOD_VIDEO_ENDPOINT_ID=your-runpod-serverless-endpoint-id
+# RUNPOD_VIDEO_BASE_URL=https://api.runpod.ai/v2
+# RUNPOD_VIDEO_MODEL=ltx-2.3-22b-distilled-1.1
+# RUNPOD_VIDEO_WIDTH=576
+# RUNPOD_VIDEO_HEIGHT=1024
+# RUNPOD_VIDEO_DURATION_SECONDS=4
+# RUNPOD_VIDEO_FRAME_RATE=24
+# RUNPOD_VIDEO_EXECUTION_TIMEOUT_MS=1800000
+# RUNPOD_VIDEO_TTL_MS=7200000
+# RUNPOD_VIDEO_REFERENCE_IMAGE_MAX_BYTES=6000000
+# RUNPOD_VIDEO_SIGNED_URL_TTL_SECONDS=3600
+# RUNPOD_VIDEO_COST_PER_SECOND_USD=0
 ```
 
 3. Start the app:
@@ -187,6 +207,7 @@ Image model notes:
 
 Vertex video settings:
 
+- `VIDEO_PROVIDER_ORDER`: default `vertex,runpod`
 - `VERTEX_VIDEO_MODEL`
 - `VERTEX_VIDEO_ASPECT_RATIO`
 - `VERTEX_VIDEO_DURATION_SECONDS`
@@ -195,6 +216,32 @@ Vertex video settings:
 - `TELEGRAM_VIDEO_REQUEST_TIMEOUT_SECONDS`
 - `VIDEO_JOB_POLL_INTERVAL_SECONDS`
 - `VERTEX_VIDEO_COST_PER_SECOND_USD`: optional log-only estimate rate, default `0`
+
+Runpod video settings:
+
+- `RUNPOD_API_KEY`
+- `RUNPOD_VIDEO_ENDPOINT_ID`
+- `RUNPOD_VIDEO_BASE_URL`: default `https://api.runpod.ai/v2`
+- `RUNPOD_VIDEO_MODEL`: default `ltx-2.3-22b-distilled-1.1`
+- `RUNPOD_VIDEO_WIDTH`: default `576`, must be divisible by `64`
+- `RUNPOD_VIDEO_HEIGHT`: default `1024`, must be divisible by `64`
+- `RUNPOD_VIDEO_DURATION_SECONDS`: defaults to `VERTEX_VIDEO_DURATION_SECONDS` when unset
+- `RUNPOD_VIDEO_FRAME_RATE`: default `24`
+- `RUNPOD_VIDEO_EXECUTION_TIMEOUT_MS`: default `1800000`
+- `RUNPOD_VIDEO_TTL_MS`: default `7200000`
+- `RUNPOD_VIDEO_REFERENCE_IMAGE_MAX_BYTES`: default `6000000`
+- `RUNPOD_VIDEO_SIGNED_URL_TTL_SECONDS`: default `3600`
+- `RUNPOD_VIDEO_COST_PER_SECOND_USD`: optional log-only estimate rate, default `0`
+
+Runpod worker contract:
+
+- deploy a queue-based Serverless endpoint that accepts `/run` and `/status/{job_id}`
+- the endpoint ID setting is the plain Runpod endpoint ID, not the `/v2/.../run` URL path
+- request input is `prompt`, `model`, `width`, `height`, `num_frames`, `frame_rate`, and optional `image_base64`
+- for LTX, `num_frames` is snapped to the nearest valid `8k+1` frame count at or above the requested duration
+- completed output may include a direct URL such as `video_url`, or LTX durable-upload metadata under `s3.bucket`, `s3.key`, and `s3.endpoint_url`
+- for GCS-backed `s3` output, the bot signs the derived `gs://bucket/key` URL transiently, downloads it for Telegram delivery, and persists only the durable `gs://` URI
+- the bot does not persist raw video, signed URLs, or reference-image bytes in SQLite
 
 Observability notes:
 
@@ -251,12 +298,14 @@ docker run --rm \
 - `/status`: show update mode, configured models, and memory status
 - `/reset`: archive the current conversation and start a fresh one
 - `/image <prompt>`: generate one image through Vertex AI
-- `/video <prompt>`: queue one short video through Vertex AI
+- `/video <prompt>`: queue one short video through Vertex AI, with Runpod fallback only on Vertex safety rejections
+- `/video_ltx <prompt>`: queue one short video directly through Runpod LTX
 
 Reference-image commands:
 
 - send one photo with caption `/image <prompt>` to use that photo as the image-generation reference; this path requires a Gemini image model
 - send one photo with caption `/video <prompt>` to queue an image-to-video job using that photo as the first-frame reference
+- send one photo with caption `/video_ltx <prompt>` to queue a Runpod LTX image-to-video job using that photo as the reference image
 - send one photo with any other caption to keep using the normal OpenAI image-understanding path
 
 ## Testing
@@ -267,7 +316,7 @@ Run the test suite:
 uv run pytest
 ```
 
-The repository already includes tests for health and readiness, normalization, allowlist handling, history reuse, reset behavior, draft streaming and fallback, Telegram formatting, image generation, reference-image command captions, video job handling, and the Vertex provider flows.
+The repository already includes tests for health and readiness, normalization, allowlist handling, history reuse, reset behavior, draft streaming and fallback, Telegram formatting, image generation, reference-image command captions, video job handling, Vertex provider flows, Runpod provider flows, and video provider routing.
 
 ## Project Layout
 

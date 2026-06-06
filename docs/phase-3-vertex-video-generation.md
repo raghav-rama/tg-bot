@@ -14,6 +14,8 @@ Phase 4 reference-image note:
 
 - Phase 3 shipped text-to-video only.
 - Phase 4 extends `/video` so a Telegram photo captioned `/video <prompt>` can queue an image-to-video job using that photo as a transient reference image.
+- Phase 4 also adds Runpod-hosted LTX routing: `/video` falls back to Runpod only when Vertex returns a classified safety/unsafe rejection, and `/video_ltx <prompt>` forces Runpod for manual testing.
+- Phase 4 Runpod LTX routing uses native LTX dimensions and frame counts, and can deliver GCS-backed worker outputs by signing the durable `gs://` asset URI transiently in the bot process.
 - Raw reference photo bytes remain request-only inputs and are not persisted in SQLite.
 
 ## Source-Grounded API Facts
@@ -178,6 +180,7 @@ Initial implementation notes:
 
 - `VERTEX_VIDEO_OUTPUT_GCS_URI` is optional; when omitted, the provider prefers inline video bytes returned by Vertex
 - when Vertex only returns a `gs://` asset URI, the provider can fetch the result later from Cloud Storage
+- Runpod LTX uses `RUNPOD_VIDEO_WIDTH`, `RUNPOD_VIDEO_HEIGHT`, `RUNPOD_VIDEO_DURATION_SECONDS`, `RUNPOD_VIDEO_FRAME_RATE`, and `RUNPOD_VIDEO_SIGNED_URL_TTL_SECONDS` for native LTX generation and GCS delivery
 - Telegram video uploads should use a request timeout above the aiogram default `60s` when larger generated assets are expected, because Telegram may finish delivery after the client-side timeout window closes
 
 ## Storage Lifecycle Rule
@@ -186,7 +189,7 @@ Phase 3 treats generated video assets as delivery-time artifacts, not durable ap
 
 - inline video bytes are held in memory only for the active polling and delivery path, then discarded
 - SQLite persists metadata plus the optional output URI, not raw video bytes
-- if Vertex returns or writes a `gs://` asset URI, long-term retention and cleanup are expected to be managed by the configured bucket lifecycle policy outside this app
+- if Vertex or Runpod returns or writes a `gs://` asset URI, long-term retention and cleanup are expected to be managed by the configured bucket lifecycle policy outside this app
 
 ## Exit Criteria
 

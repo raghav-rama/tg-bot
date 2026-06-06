@@ -14,8 +14,10 @@ from app.domain.services import ChatService
 from app.logging import configure_logging, log_kv
 from app.providers.base import AIProvider, ImageGenerator, VideoGenerator
 from app.providers.openai_provider import OpenAIProvider
+from app.providers.runpod_video_provider import RunpodVideoProvider
 from app.providers.vertex_image_provider import VertexImageProvider
 from app.providers.vertex_video_provider import VertexVideoProvider
+from app.providers.video_router import VideoProviderRouter
 from app.storage.conversations import ConversationRepository
 from app.storage.db import Database
 from app.storage.generation_jobs import GenerationJobRepository
@@ -92,8 +94,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
                 container.image_generator = image_generator
             video_generator = None
+            video_providers: dict[str, VideoGenerator] = {}
             if loaded_settings.vertex_video_generation_enabled:
-                video_generator = VertexVideoProvider(
+                video_providers["vertex"] = VertexVideoProvider(
                     api_key=(
                         loaded_settings.vertex_api_key.get_secret_value()
                         if loaded_settings.vertex_api_key is not None
@@ -105,6 +108,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     default_aspect_ratio=loaded_settings.vertex_video_aspect_ratio,
                     default_duration_seconds=loaded_settings.vertex_video_duration_seconds,
                     default_output_gcs_uri=loaded_settings.vertex_video_output_gcs_uri,
+                )
+            if loaded_settings.runpod_video_generation_enabled:
+                video_providers["runpod"] = RunpodVideoProvider(
+                    api_key=(
+                        loaded_settings.runpod_api_key.get_secret_value()
+                        if loaded_settings.runpod_api_key is not None
+                        else ""
+                    ),
+                    endpoint_id=loaded_settings.runpod_video_endpoint_id or "",
+                    base_url=loaded_settings.runpod_video_base_url,
+                    default_model=loaded_settings.runpod_video_model,
+                    default_width=loaded_settings.runpod_video_width,
+                    default_height=loaded_settings.runpod_video_height,
+                    default_duration_seconds=(
+                        loaded_settings.runpod_video_duration_seconds
+                    ),
+                    default_frame_rate=loaded_settings.runpod_video_frame_rate,
+                    execution_timeout_ms=(
+                        loaded_settings.runpod_video_execution_timeout_ms
+                    ),
+                    ttl_ms=loaded_settings.runpod_video_ttl_ms,
+                    reference_image_max_bytes=(
+                        loaded_settings.runpod_video_reference_image_max_bytes
+                    ),
+                    signed_url_ttl_seconds=(
+                        loaded_settings.runpod_video_signed_url_ttl_seconds
+                    ),
+                )
+            if video_providers:
+                video_generator = VideoProviderRouter(
+                    providers=video_providers,
+                    provider_order=loaded_settings.video_provider_order,
+                    provider_models={
+                        "vertex": loaded_settings.vertex_video_model,
+                        "runpod": loaded_settings.runpod_video_model,
+                    },
                 )
                 container.video_generator = video_generator
             chat_service = ChatService(
@@ -161,6 +200,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await video_job_worker.start()
 
             app.state.container = container
+            enabled_video_models: list[str] = []
+            if loaded_settings.vertex_video_generation_enabled:
+                enabled_video_models.append(
+                    f"vertex:{loaded_settings.vertex_video_model}"
+                )
+            if loaded_settings.runpod_video_generation_enabled:
+                enabled_video_models.append(
+                    f"runpod:{loaded_settings.runpod_video_model}"
+                )
             logger.info(
                 log_kv(
                     "application_started",
@@ -171,12 +219,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         else None
                     ),
                     model=loaded_settings.openai_model,
-                    video_generation_enabled=loaded_settings.vertex_video_generation_enabled,
+                    video_generation_enabled=loaded_settings.video_generation_enabled,
                     video_model=(
-                        loaded_settings.vertex_video_model
-                        if loaded_settings.vertex_video_generation_enabled
+                        ",".join(enabled_video_models)
+                        if enabled_video_models
                         else None
                     ),
+                    video_provider_order=",".join(loaded_settings.video_provider_order),
                     video_output_gcs_uri=loaded_settings.vertex_video_output_gcs_uri,
                     video_poll_interval_seconds=loaded_settings.video_job_poll_interval_seconds,
                 )

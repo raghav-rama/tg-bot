@@ -21,6 +21,7 @@ from app.domain.commands import (
     VIDEO_GENERATION_NOT_CONFIGURED_TEXT,
     VIDEO_GENERATION_QUEUED_TEXT,
     VIDEO_GENERATION_RETRY_TEXT,
+    VIDEO_LTX_PROMPT_REQUIRED_TEXT,
     VIDEO_PROMPT_REQUIRED_TEXT,
     UNSUPPORTED_MESSAGE_TEXT,
     render_help_message,
@@ -369,8 +370,8 @@ class ChatService:
                 chat_model=self.settings.openai_model,
                 image_generation_enabled=self.settings.vertex_image_generation_enabled,
                 image_model=self.settings.vertex_image_model,
-                video_generation_enabled=self.settings.vertex_video_generation_enabled,
-                video_model=self.settings.vertex_video_model,
+                video_generation_enabled=self.settings.video_generation_enabled,
+                video_model=self._video_status_model(),
                 memory_enabled=self.settings.bot_history_max_turns > 0,
             )
         elif command == "/image":
@@ -380,7 +381,7 @@ class ChatService:
                 responder=responder,
                 active_run=active_run,
             )
-        elif command == "/video":
+        elif command in {"/video", "/video_ltx"}:
             return await self._handle_video_command(
                 conversation=conversation,
                 message=message,
@@ -509,12 +510,17 @@ class ChatService:
     ) -> ServiceReply:
         prompt = self._extract_video_prompt(message)
         if prompt is None:
+            prompt_required_text = (
+                VIDEO_LTX_PROMPT_REQUIRED_TEXT
+                if (message.command or "").lower() == "/video_ltx"
+                else VIDEO_PROMPT_REQUIRED_TEXT
+            )
             await self._persist_command_exchange(
                 conversation,
                 message,
-                VIDEO_PROMPT_REQUIRED_TEXT,
+                prompt_required_text,
             )
-            return ServiceReply(text=VIDEO_PROMPT_REQUIRED_TEXT)
+            return ServiceReply(text=prompt_required_text)
 
         if self.video_generator is None or self.generation_jobs is None:
             await self._persist_command_exchange(
@@ -525,10 +531,19 @@ class ChatService:
             return ServiceReply(text=VIDEO_GENERATION_NOT_CONFIGURED_TEXT)
 
         await self._persist_user_command_message(conversation, message)
+        provider_hint = (
+            "runpod" if (message.command or "").lower() == "/video_ltx" else "auto"
+        )
+        requested_provider = "runpod" if provider_hint == "runpod" else "vertex"
+        requested_model = self._video_model_for_provider(requested_provider)
+        requested_duration_seconds = self._video_duration_for_provider(
+            requested_provider
+        )
+        requested_cost_per_second = self._video_cost_for_provider(requested_provider)
         usage_fields = estimate_video_usage(
             prompt=prompt,
-            duration_seconds=self.settings.vertex_video_duration_seconds,
-            cost_per_second_usd=self.settings.vertex_video_cost_per_second_usd,
+            duration_seconds=requested_duration_seconds,
+            cost_per_second_usd=requested_cost_per_second,
         )
         self.logger.info(
             log_kv(
@@ -536,10 +551,21 @@ class ChatService:
                 update_id=message.update_id,
                 chat_id=message.chat_id,
                 user_id=message.user_id,
-                provider="vertex",
-                model=self.settings.vertex_video_model,
+                provider=requested_provider,
+                provider_hint=provider_hint,
+                model=requested_model,
                 aspect_ratio=self.settings.vertex_video_aspect_ratio,
                 output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
+                runpod_width=(
+                    self.settings.runpod_video_width
+                    if requested_provider == "runpod"
+                    else None
+                ),
+                runpod_height=(
+                    self.settings.runpod_video_height
+                    if requested_provider == "runpod"
+                    else None
+                ),
                 **usage_fields,
             )
         )
@@ -548,11 +574,12 @@ class ChatService:
                 chat_id=message.chat_id,
                 user_id=message.user_id,
                 prompt=prompt,
-                model=self.settings.vertex_video_model,
+                model=requested_model,
                 aspect_ratio=self.settings.vertex_video_aspect_ratio,
-                duration_seconds=self.settings.vertex_video_duration_seconds,
+                duration_seconds=requested_duration_seconds,
                 output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
                 reference_image=message.image,
+                provider_hint=provider_hint,
             )
         )
         self.logger.info(
@@ -575,11 +602,16 @@ class ChatService:
             provider=submitted_job.provider,
             model=submitted_job.raw_model,
             operation_name=submitted_job.operation_name,
-            duration_seconds=self.settings.vertex_video_duration_seconds,
+            duration_seconds=requested_duration_seconds,
             created_at=message.sent_at,
         )
         await self._persist_command_reply(conversation, VIDEO_GENERATION_QUEUED_TEXT)
         await self.conversations.touch(conversation.id)
+        usage_fields = estimate_video_usage(
+            prompt=prompt,
+            duration_seconds=self._video_duration_for_provider(submitted_job.provider),
+            cost_per_second_usd=self._video_cost_for_provider(submitted_job.provider),
+        )
         return ServiceReply(text=VIDEO_GENERATION_QUEUED_TEXT, usage_fields=usage_fields)
 
     async def _persist_command_exchange(
@@ -848,16 +880,50 @@ class ChatService:
         if self._is_image_command(message):
             return ("vertex", self.settings.vertex_image_model)
         if self._is_video_command(message):
-            return ("vertex", self.settings.vertex_video_model)
+            provider = (
+                "runpod"
+                if (message.command or "").lower() == "/video_ltx"
+                else "vertex"
+            )
+            return (provider, self._video_model_for_provider(provider))
         if message.message_type != "command":
             return ("openai", self.settings.openai_model)
         return (None, None)
 
     def _is_image_command(self, message: InboundMessage) -> bool:
-        return message.message_type == "command" and (message.command or "").lower() == "/image"
+        return (
+            message.message_type == "command"
+            and (message.command or "").lower() == "/image"
+        )
 
     def _is_video_command(self, message: InboundMessage) -> bool:
-        return message.message_type == "command" and (message.command or "").lower() == "/video"
+        return message.message_type == "command" and (message.command or "").lower() in {
+            "/video",
+            "/video_ltx",
+        }
+
+    def _video_model_for_provider(self, provider: str) -> str:
+        if provider == "runpod":
+            return self.settings.runpod_video_model
+        return self.settings.vertex_video_model
+
+    def _video_cost_for_provider(self, provider: str) -> float:
+        if provider == "runpod":
+            return self.settings.runpod_video_cost_per_second_usd
+        return self.settings.vertex_video_cost_per_second_usd
+
+    def _video_duration_for_provider(self, provider: str) -> int | None:
+        if provider == "runpod":
+            return self.settings.runpod_video_duration_seconds
+        return self.settings.vertex_video_duration_seconds
+
+    def _video_status_model(self) -> str:
+        enabled_models: list[str] = []
+        if self.settings.vertex_video_generation_enabled:
+            enabled_models.append(f"vertex:{self.settings.vertex_video_model}")
+        if self.settings.runpod_video_generation_enabled:
+            enabled_models.append(f"runpod:{self.settings.runpod_video_model}")
+        return ", ".join(enabled_models) or self.settings.vertex_video_model
 
     def _drafts_enabled(
         self,

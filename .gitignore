@@ -3,7 +3,8 @@ __pycache__/
 .venv/
 data/
 *.egg-info/
+.env
+.env.local
 .envrc
 service-account.json
 .DS_Store
-

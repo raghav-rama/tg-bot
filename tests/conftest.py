@@ -115,9 +115,10 @@ class FakeVideoGenerator:
         self.submit_calls.append(request)
         if self.submit_error is not None:
             raise self.submit_error
+        provider = "runpod" if request.provider_hint == "runpod" else "vertex"
         return SubmittedVideoJob(
             operation_name=f"operations/{len(self.submit_calls)}",
-            provider="vertex",
+            provider=provider,
             raw_model=request.model,
         )
 
@@ -133,7 +134,7 @@ class FakeVideoGenerator:
             generated_video=GeneratedVideoResult(
                 video_bytes=self.video_bytes,
                 mime_type="video/mp4",
-                provider="vertex",
+                provider=request.provider,
                 raw_model=request.model,
                 prompt=request.prompt,
                 output_uri=None,

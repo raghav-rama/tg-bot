@@ -101,6 +101,7 @@ async def test_worker_completes_video_job_and_delivers_video(service_bundle) -> 
     stored_messages = await messages.list_for_conversation(conversation.id)
 
     assert processed == 1
+    assert video_generator.poll_calls[0].provider == "vertex"
     assert emitter.sent_videos == [b"generated-video"]
     assert emitter.sent_texts == ["Your video is ready."]
     assert stored_jobs[0].status == "completed"
@@ -111,6 +112,44 @@ async def test_worker_completes_video_job_and_delivers_video(service_bundle) -> 
         "command",
         "generated_video",
     ]
+
+
+async def test_worker_completes_runpod_job_by_persisted_provider(service_bundle) -> None:
+    conversations = service_bundle["conversations"]
+    messages = service_bundle["messages"]
+    generation_jobs = service_bundle["generation_jobs"]
+    settings = service_bundle["settings"]
+    video_generator = service_bundle["video_generator"]
+    conversation = await conversations.get_or_create_active(505)
+    await generation_jobs.add_video_job(
+        conversation_id=conversation.id,
+        chat_id=505,
+        user_id=42,
+        prompt_text="simple cinematic shot of clouds over a valley",
+        provider="runpod",
+        model=settings.runpod_video_model,
+        operation_name="runpod-job-1",
+        duration_seconds=4,
+        created_at=utc_datetime(),
+    )
+
+    emitter = RecordingEmitter()
+    worker = VideoJobWorker(
+        settings=settings,
+        conversations=conversations,
+        messages=messages,
+        generation_jobs=generation_jobs,
+        video_generator=video_generator,
+        emitter_factory=lambda _chat_id: emitter,
+    )
+
+    await worker.run_once()
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+
+    assert video_generator.poll_calls[0].provider == "runpod"
+    assert emitter.sent_videos == [b"generated-video"]
+    assert stored_jobs[0].status == "completed"
+    assert stored_jobs[0].provider == "runpod"
 
 
 async def test_worker_logs_completion_usage_and_cost_estimate(

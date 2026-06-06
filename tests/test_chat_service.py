@@ -555,15 +555,48 @@ async def test_video_command_queues_generation_job(service_bundle) -> None:
     assert reply.text == "Video generation started. I'll send it here when it's ready."
     assert reply.delivered is True
     assert len(video_generator.submit_calls) == 1
+    assert video_generator.submit_calls[0].provider_hint == "auto"
     assert conversation is not None
 
     stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
     assert len(stored_jobs) == 1
     assert stored_jobs[0].status == "queued"
+    assert stored_jobs[0].provider == "vertex"
     assert stored_jobs[0].prompt_text == "slow cinematic dolly shot through a rainy neon alley"
     assert stored_jobs[0].operation_name == "operations/1"
     assert emitter.sent_texts == [reply.text]
     assert emitter.sent_videos == []
+
+
+async def test_video_ltx_command_submits_runpod_job(service_bundle) -> None:
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
+    video_generator = service_bundle["video_generator"]
+    emitter = FakeResponseEmitter()
+
+    reply = await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=224,
+            command="/video_ltx simple cinematic shot of clouds over a valley",
+            update_id=19,
+        ),
+        responder=emitter,
+    )
+    conversation = await conversations.get_active(224)
+
+    assert reply.text == "Video generation started. I'll send it here when it's ready."
+    assert reply.delivered is True
+    assert len(video_generator.submit_calls) == 1
+    assert video_generator.submit_calls[0].provider_hint == "runpod"
+    assert conversation is not None
+
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    assert len(stored_jobs) == 1
+    assert stored_jobs[0].provider == "runpod"
+    assert stored_jobs[0].model == service.settings.runpod_video_model
+    assert stored_jobs[0].prompt_text == "simple cinematic shot of clouds over a valley"
 
 
 async def test_video_caption_command_passes_reference_image_to_submission(

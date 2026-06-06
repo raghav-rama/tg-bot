@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import urlparse
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.providers.vertex_image_models import requires_global_location
 
@@ -131,6 +132,53 @@ class Settings(BaseSettings):
         default=0.0,
         alias="VERTEX_VIDEO_COST_PER_SECOND_USD",
     )
+    video_provider_order: Annotated[tuple[str, ...], NoDecode] = Field(
+        default=("vertex", "runpod"),
+        alias="VIDEO_PROVIDER_ORDER",
+    )
+    runpod_api_key: SecretStr | None = Field(default=None, alias="RUNPOD_API_KEY")
+    runpod_video_endpoint_id: str | None = Field(
+        default=None,
+        alias="RUNPOD_VIDEO_ENDPOINT_ID",
+    )
+    runpod_video_base_url: str = Field(
+        default="https://api.runpod.ai/v2",
+        alias="RUNPOD_VIDEO_BASE_URL",
+    )
+    runpod_video_model: str = Field(
+        default="ltx-2.3-22b-distilled-1.1",
+        alias="RUNPOD_VIDEO_MODEL",
+    )
+    runpod_video_width: int = Field(default=576, alias="RUNPOD_VIDEO_WIDTH")
+    runpod_video_height: int = Field(default=1024, alias="RUNPOD_VIDEO_HEIGHT")
+    runpod_video_duration_seconds: int | None = Field(
+        default=None,
+        alias="RUNPOD_VIDEO_DURATION_SECONDS",
+    )
+    runpod_video_frame_rate: float = Field(
+        default=24.0,
+        alias="RUNPOD_VIDEO_FRAME_RATE",
+    )
+    runpod_video_execution_timeout_ms: int = Field(
+        default=1_800_000,
+        alias="RUNPOD_VIDEO_EXECUTION_TIMEOUT_MS",
+    )
+    runpod_video_ttl_ms: int = Field(
+        default=7_200_000,
+        alias="RUNPOD_VIDEO_TTL_MS",
+    )
+    runpod_video_reference_image_max_bytes: int = Field(
+        default=6_000_000,
+        alias="RUNPOD_VIDEO_REFERENCE_IMAGE_MAX_BYTES",
+    )
+    runpod_video_signed_url_ttl_seconds: int = Field(
+        default=3600,
+        alias="RUNPOD_VIDEO_SIGNED_URL_TTL_SECONDS",
+    )
+    runpod_video_cost_per_second_usd: float = Field(
+        default=0.0,
+        alias="RUNPOD_VIDEO_COST_PER_SECOND_USD",
+    )
     bot_video_max_bytes: int = Field(
         default=50 * 1024 * 1024,
         alias="BOT_VIDEO_MAX_BYTES",
@@ -188,6 +236,9 @@ class Settings(BaseSettings):
         "vertex_video_model",
         "vertex_video_aspect_ratio",
         "vertex_video_output_gcs_uri",
+        "runpod_video_endpoint_id",
+        "runpod_video_base_url",
+        "runpod_video_model",
         mode="before",
     )
     @classmethod
@@ -197,7 +248,7 @@ class Settings(BaseSettings):
         normalized = value.strip()
         return normalized or None
 
-    @field_validator("telegram_webhook_secret_token", mode="before")
+    @field_validator("telegram_webhook_secret_token", "runpod_api_key", mode="before")
     @classmethod
     def normalize_optional_secret(
         cls,
@@ -238,11 +289,45 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("video_provider_order", mode="before")
+    @classmethod
+    def normalize_video_provider_order(
+        cls,
+        value: str | tuple[str, ...],
+    ) -> tuple[str, ...]:
+        if isinstance(value, str):
+            providers = tuple(
+                part.strip().lower() for part in value.split(",") if part.strip()
+            )
+        else:
+            providers = tuple(
+                str(part).strip().lower() for part in value if str(part).strip()
+            )
+        allowed = {"vertex", "runpod"}
+        if not providers:
+            raise ValueError("VIDEO_PROVIDER_ORDER must include at least one provider")
+        unknown = sorted(set(providers) - allowed)
+        if unknown:
+            raise ValueError(
+                "VIDEO_PROVIDER_ORDER contains unsupported providers: "
+                + ", ".join(unknown)
+            )
+        if len(set(providers)) != len(providers):
+            raise ValueError("VIDEO_PROVIDER_ORDER must not contain duplicate providers")
+        return providers
+
     @field_validator(
         "vertex_video_duration_seconds",
         "bot_video_max_bytes",
         "telegram_video_request_timeout_seconds",
         "video_job_poll_interval_seconds",
+        "runpod_video_width",
+        "runpod_video_height",
+        "runpod_video_duration_seconds",
+        "runpod_video_execution_timeout_ms",
+        "runpod_video_ttl_ms",
+        "runpod_video_reference_image_max_bytes",
+        "runpod_video_signed_url_ttl_seconds",
     )
     @classmethod
     def validate_positive_ints(cls, value: int | None) -> int | None:
@@ -252,11 +337,33 @@ class Settings(BaseSettings):
             raise ValueError("video settings must be greater than zero")
         return value
 
+    @field_validator("runpod_video_width")
+    @classmethod
+    def validate_runpod_video_width(cls, value: int) -> int:
+        if value % 64 != 0:
+            raise ValueError("RUNPOD_VIDEO_WIDTH must be divisible by 64")
+        return value
+
+    @field_validator("runpod_video_height")
+    @classmethod
+    def validate_runpod_video_height(cls, value: int) -> int:
+        if value % 64 != 0:
+            raise ValueError("RUNPOD_VIDEO_HEIGHT must be divisible by 64")
+        return value
+
+    @field_validator("runpod_video_frame_rate")
+    @classmethod
+    def validate_runpod_video_frame_rate(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("RUNPOD_VIDEO_FRAME_RATE must be greater than zero")
+        return value
+
     @field_validator(
         "openai_input_cost_per_1m_tokens_usd",
         "openai_output_cost_per_1m_tokens_usd",
         "vertex_image_cost_per_image_usd",
         "vertex_video_cost_per_second_usd",
+        "runpod_video_cost_per_second_usd",
     )
     @classmethod
     def validate_non_negative_floats(cls, value: float) -> float:
@@ -292,6 +399,18 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def validate_runpod_video_settings(self) -> Settings:
+        has_api_key = self.runpod_api_key is not None
+        has_endpoint_id = self.runpod_video_endpoint_id is not None
+        if has_api_key != has_endpoint_id:
+            raise ValueError(
+                "RUNPOD_API_KEY and RUNPOD_VIDEO_ENDPOINT_ID must be configured together"
+            )
+        if self.runpod_video_duration_seconds is None:
+            self.runpod_video_duration_seconds = self.vertex_video_duration_seconds
+        return self
+
     @property
     def allowed_user_ids(self) -> set[int]:
         return {int(part) for part in self.telegram_allowed_user_ids.split(",") if part}
@@ -303,3 +422,15 @@ class Settings(BaseSettings):
     @property
     def vertex_video_generation_enabled(self) -> bool:
         return self.vertex_api_key is not None or self.vertex_project_id is not None
+
+    @property
+    def runpod_video_generation_enabled(self) -> bool:
+        return self.runpod_api_key is not None and self.runpod_video_endpoint_id is not None
+
+    @property
+    def video_generation_enabled(self) -> bool:
+        enabled_by_provider = {
+            "vertex": self.vertex_video_generation_enabled,
+            "runpod": self.runpod_video_generation_enabled,
+        }
+        return any(enabled_by_provider[provider] for provider in self.video_provider_order)

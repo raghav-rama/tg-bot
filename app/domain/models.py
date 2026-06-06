@@ -8,6 +8,8 @@ MessageType = Literal["text", "image", "command"]
 Role = Literal["user", "assistant"]
 ChatType = Literal["private", "group", "supergroup", "channel"]
 GenerationJobStatus = Literal["queued", "running", "completed", "failed"]
+VideoProviderName = Literal["vertex", "runpod"]
+VideoProviderHint = Literal["auto", "vertex", "runpod"]
 
 
 @dataclass(slots=True)
@@ -188,6 +190,7 @@ class VideoGenerationRequest:
     duration_seconds: int | None
     output_gcs_uri: str | None
     reference_image: ImageInput | None = None
+    provider_hint: VideoProviderHint = "auto"
 
 
 @dataclass(slots=True)
@@ -195,6 +198,7 @@ class VideoGenerationPollRequest:
     operation_name: str
     prompt: str
     model: str
+    provider: VideoProviderName
 
 
 @dataclass(slots=True)

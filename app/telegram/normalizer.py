@@ -83,7 +83,7 @@ def normalize_message(
             caption=caption,
         )
         command = _extract_command(caption) if caption else None
-        if command in {"/image", "/video"}:
+        if command in {"/image", "/video", "/video_ltx"}:
             return InboundMessage(
                 update_id=update_id,
                 telegram_message_id=message.message_id,

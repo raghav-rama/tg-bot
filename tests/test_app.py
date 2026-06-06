@@ -12,10 +12,11 @@ from app.storage.db import Database
 from app.telegram.polling import TelegramRuntime
 
 
-def test_healthz_is_live_when_settings_are_missing(monkeypatch) -> None:
+def test_healthz_is_live_when_settings_are_missing(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("TELEGRAM_ALLOWED_USER_IDS", raising=False)
+    monkeypatch.chdir(tmp_path)
 
     with TestClient(create_app()) as client:
         health_response = client.get("/healthz")

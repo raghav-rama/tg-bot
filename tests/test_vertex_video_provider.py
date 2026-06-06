@@ -197,6 +197,7 @@ async def test_poll_video_returns_running_status() -> None:
             operation_name="operations/123",
             prompt="tracking shot through a glowing cave",
             model="veo-3.0-fast-generate-001",
+            provider="vertex",
         )
     )
 
@@ -255,6 +256,7 @@ async def test_poll_video_returns_inline_video_bytes() -> None:
             operation_name="operations/123",
             prompt="tracking shot through a glowing cave",
             model="veo-3.0-fast-generate-001",
+            provider="vertex",
         )
     )
 
@@ -316,6 +318,7 @@ async def test_poll_video_downloads_from_uri_when_bytes_are_missing() -> None:
             operation_name="operations/123",
             prompt="tracking shot through a glowing cave",
             model="veo-3.0-fast-generate-001",
+            provider="vertex",
         )
     )
 
