@@ -369,4 +369,5 @@ uv.lock
 ## Notes For Future Work
 
 - distributed workers and external job queues are out of scope today
-- richer observability, quotas, and stronger in-app retention controls remain Phase 4 work
+- per-user/per-chat quotas, daily media budget caps, prompt/reference-image moderation gates, and in-app provider-output URL retention/expiry handling are deferred out of active Phase 4 scope
+- Fal-hosted video provider support is planned for Phase 6 as an expansion of the existing queued `/video` provider path, with likely Kling 3 and Seedance 2 presets
