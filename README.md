@@ -4,12 +4,17 @@ Private Telegram bot built with FastAPI, SQLite, OpenAI chat, Vertex AI image/vi
 
 ## Status
 
-The repository has completed `Phase 3 - Vertex Video Generation` and is now aligned to `Phase 4 - Hardening And Expansion`.
+The repository has completed `Phase 4 - Hardening And Expansion`. `Phase 5 - ElevenLabs Hindi Text To Speech` and `Phase 6 - Fal Video Provider Support` are now in progress in parallel isolated git worktrees.
 
-Implemented today:
+Active worktrees:
+
+- Phase 5 TTS: `.worktrees/phase-5-elevenlabs-tts` on branch `phase-5-elevenlabs-tts`
+- Phase 6 Fal provider: `.worktrees/phase-6-fal-video-provider` on branch `phase-6-fal-video-provider`
+
+Implemented through Phase 4:
 
 - private, allowlisted Telegram bot
-- polling-first runtime plus a Phase 4 webhook mode that self-registers with Telegram
+- polling-first runtime plus webhook mode that self-registers with Telegram
 - SQLite-backed conversation memory and reset semantics
 - text chat and single-photo understanding through OpenAI
 - Telegram draft streaming for long-running text replies
@@ -369,5 +374,5 @@ uv.lock
 ## Notes For Future Work
 
 - distributed workers and external job queues are out of scope today
-- per-user/per-chat quotas, daily media budget caps, prompt/reference-image moderation gates, and in-app provider-output URL retention/expiry handling are deferred out of active Phase 4 scope
-- Fal-hosted video provider support is planned for Phase 6 as an expansion of the existing queued `/video` provider path, with likely Kling 3 and Seedance 2 presets
+- per-user/per-chat quotas, daily media budget caps, prompt/reference-image moderation gates, and in-app provider-output URL retention/expiry handling were deferred out of completed Phase 4 and remain future work unless the roadmap changes
+- Fal-hosted video provider support is in progress for `Phase 6 - Fal Video Provider Support` in a separate worktree from `Phase 5 - ElevenLabs Hindi Text To Speech`, as an expansion of the existing queued `/video` provider path with likely Kling 3 and Seedance 2 presets

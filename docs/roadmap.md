@@ -14,14 +14,22 @@ This document separates the current repo state from the planned delivery phases.
 
 ## Current Phase
 
-- Active phase: `Phase 4 - Hardening And Expansion`
+- Active phases:
+  - `Phase 5 - ElevenLabs Hindi Text To Speech`
+  - `Phase 6 - Fal Video Provider Support`
 - Status: `in_progress`
 - Last updated: `2026-06-18`
-- Previous phase accepted: `Phase 3 - Vertex Video Generation`
+- Previous phase accepted: `Phase 4 - Hardening And Expansion`
+- Parallel implementation worktrees:
+  - Phase 5 branch: `phase-5-elevenlabs-tts`
+  - Phase 5 path: `.worktrees/phase-5-elevenlabs-tts`
+  - Phase 6 branch: `phase-6-fal-video-provider`
+  - Phase 6 path: `.worktrees/phase-6-fal-video-provider`
 - Evidence:
   - Phase 1 foundation work is accepted as complete for repo sequencing
   - Phase 1.5 draft streaming is accepted as complete and no longer blocks the next milestone
   - Phase 2 image generation is accepted as complete for repo sequencing
+  - Phase 3 video generation is accepted as complete for repo sequencing
   - an explicit `/video` command path now exists alongside the existing OpenAI chat and `/image` flows
   - video generation now uses persisted `generation_jobs` rows plus a background polling worker instead of blocking the original request path
   - completed video jobs now deliver through Telegram `sendVideo`
@@ -30,10 +38,14 @@ This document separates the current repo state from the planned delivery phases.
   - Phase 4 now supports Telegram photo captions that start with `/image`, `/video`, or `/video_ltx`, and text commands that reply to a Telegram photo, as reference-image generation commands
   - Phase 4 now has a provider-neutral video router: `/video` tries Vertex first and falls back to Runpod LTX only on classified Vertex safety rejections, while `/video_ltx` forces Runpod for manual testing
   - Phase 4 now includes `/settings` inline-button presets stored per chat and user for safe video provider, video duration, video aspect/orientation, Runpod LTX, image, and chat request tuning
+  - the remaining quota, budget-cap, moderation-gate, and in-app provider-output URL retention/expiry items are explicitly deferred out of Phase 4
+  - the optional provider strategy review is represented by active Phase 6 Fal provider support
+  - Phase 5 and Phase 6 implementation worktrees were created from `dev` after the `.worktrees/` ignore-rule commit
+  - both Phase 5 and Phase 6 worktrees passed baseline `uv run pytest` with `133` tests passing
 
 ## Current State
 
-As of `2026-06-18`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, the completed Phase 3 video-generation slice, and active Phase 4 hardening work.
+As of `2026-06-18`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, the completed Phase 3 video-generation slice, and the completed Phase 4 hardening and expansion work. Phase 5 ElevenLabs Hindi text-to-speech and Phase 6 Fal video provider support are in progress in parallel isolated git worktrees.
 
 - Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, OpenAI chat, Vertex image plus video generation, and Runpod LTX video fallback.
 - A polling-first runtime exists, and webhook mode now reuses the same shared processing path when enabled.
@@ -52,7 +64,7 @@ As of `2026-06-18`, this repository contains the completed Phase 1 foundation, t
 - Tests exist under `tests/` for health and readiness behavior, normalization, reply-to-photo reference commands, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, supersession, Telegram formatting, image generation, video job submission, worker completion, worker failure handling, Vertex video, Runpod video, and provider routing.
 - Real Vertex, Runpod, and Telegram verification still depends on configured credentials and a manual runtime check.
 - Inline generated video bytes remain transient in memory only, while URI-backed assets are expected to live in a bucket with lifecycle cleanup managed outside the app.
-- Phase 4 has started with a real webhook deployment path: webhook mode now registers the Telegram webhook on startup, validates the `X-Telegram-Bot-Api-Secret-Token` header on inbound requests, and reports webhook setup state through readiness.
+- Phase 4 includes a real webhook deployment path: webhook mode now registers the Telegram webhook on startup, validates the `X-Telegram-Bot-Api-Secret-Token` header on inbound requests, and reports webhook setup state through readiness.
 - Phase 4 now logs usage units and optional best-effort cost estimates for OpenAI chat, Vertex image generation, Vertex/Runpod video submission, and completed video delivery without adding a metrics backend or billing reconciliation.
 - Phase 4 now supports `APP_LOG_FORMAT=json` for production structured logs, keeps readable text logs as the local default, suppresses successful low-level HTTP client logs below `WARNING`, and keeps repeated still-running video poll state at `DEBUG`.
 - Photo captions that start with `/image <prompt>`, or text `/image <prompt>` commands that reply to a Telegram photo, use that photo as a transient reference image for Gemini image generation; Imagen remains prompt-to-image only.
@@ -70,7 +82,9 @@ Build this in order:
 4. Add generated video output only after image generation works.
 5. Harden the deployed bot before adding text-to-speech output.
 6. Add Hindi text-to-speech as a dedicated `/tts` command after Phase 4.
-7. Add Fal video provider support after Phase 5 as a provider expansion of the existing `/video` job path.
+7. Add Fal video provider support as a provider expansion of the existing `/video` job path.
+
+Phase 5 and Phase 6 are currently being implemented in parallel through isolated git worktrees because they touch separate provider surfaces: Phase 5 adds a new TTS command/provider path, while Phase 6 expands the existing queued video provider path.
 
 This ordering keeps the first milestone small, then improves reply UX before introducing richer media.
 
@@ -235,7 +249,7 @@ Phase 3 is done when:
 
 ## Phase 4 - Hardening And Expansion
 
-Status: `in_progress`
+Status: `complete`
 
 After the foundation and media-generation phases work, the next layer is operational hardening.
 
@@ -245,7 +259,7 @@ After the foundation and media-generation phases work, the next layer is operati
 - /image and /video command accept a reference image for generating content (gemini models eg: gemini-3-pro-image-preview)
 - Runpod LTX fallback for Vertex video safety false positives, with `/video_ltx` as the manual test path
 
-Current Phase 4 progress:
+Completed Phase 4 scope:
 
 - webhook mode now self-registers against Telegram with `setWebhook`
 - webhook mode now requires and validates a Telegram secret token header
@@ -268,9 +282,19 @@ Deferred out of Phase 4:
 
 These are not required before moving past Phase 4. The current asset rule remains that generated bytes and signed URLs are transient, while URI-backed assets rely on provider, bucket, or object-storage lifecycle policy outside the app.
 
+Completion note:
+
+- The optional provider strategy review is satisfied for sequencing by active Phase 6 Fal provider support, which will add Fal-hosted video models behind the existing provider interface instead of changing Phase 4 runtime behavior.
+
 ## Phase 5 - ElevenLabs Hindi Text To Speech
 
-Status: `planned`
+Status: `in_progress`
+
+Implementation worktree:
+
+- branch: `phase-5-elevenlabs-tts`
+- path: `.worktrees/phase-5-elevenlabs-tts`
+- baseline verification: `uv run pytest` passed with `133` tests
 
 ### Goal
 
@@ -316,7 +340,13 @@ Phase 5 is done when:
 
 ## Phase 6 - Fal Video Provider Support
 
-Status: `planned`
+Status: `in_progress`
+
+Implementation worktree:
+
+- branch: `phase-6-fal-video-provider`
+- path: `.worktrees/phase-6-fal-video-provider`
+- baseline verification: `uv run pytest` passed with `133` tests
 
 ### Goal
 
