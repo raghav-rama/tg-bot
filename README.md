@@ -1,17 +1,16 @@
 # tg-bot
 
-Private Telegram bot built with FastAPI, SQLite, OpenAI chat, Vertex AI image/video generation, and Runpod LTX video fallback.
+Private Telegram bot built with FastAPI, SQLite, OpenAI chat, Vertex AI image/video generation, Runpod LTX video fallback, and Fal video provider support.
 
 ## Status
 
-The repository has completed `Phase 4 - Hardening And Expansion`. `Phase 5 - ElevenLabs Hindi Text To Speech` and `Phase 6 - Fal Video Provider Support` are now in progress in parallel isolated git worktrees.
+The repository has completed `Phase 4 - Hardening And Expansion` and `Phase 6 - Fal Video Provider Support` (merged into `dev`). `Phase 5 - ElevenLabs Hindi Text To Speech` is in progress in an isolated git worktree.
 
 Active worktrees:
 
 - Phase 5 TTS: `.worktrees/phase-5-elevenlabs-tts` on branch `phase-5-elevenlabs-tts`
-- Phase 6 Fal provider: `.worktrees/phase-6-fal-video-provider` on branch `phase-6-fal-video-provider`
 
-Implemented through Phase 4:
+Implemented through Phase 4 and Phase 6:
 
 - private, allowlisted Telegram bot
 - polling-first runtime plus webhook mode that self-registers with Telegram
@@ -19,9 +18,9 @@ Implemented through Phase 4:
 - text chat and single-photo understanding through OpenAI
 - Telegram draft streaming for long-running text replies
 - `/image <prompt>` generation through Vertex AI and Telegram `sendPhoto`
-- `/video <prompt>` queued generation through Vertex AI with Runpod LTX fallback on Vertex safety rejections
+- `/video <prompt>` queued generation through Vertex AI, Runpod LTX fallback on Vertex safety rejections, or Fal video models
 - `/video_ltx <prompt>` queued generation directly through Runpod LTX for manual testing
-- `/settings` inline-button presets for per-chat/per-user video provider, duration, aspect ratio, safe Runpod LTX, image, and chat request settings
+- `/settings` inline-button presets for per-chat/per-user video provider, Fal model family (when multiple families are configured), video duration, aspect ratio, safe Runpod LTX, image, and chat request settings
 - SQLite-backed video jobs, background polling, and Telegram `sendVideo`
 - photo captions that start with `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>` use the photo as a transient reference image for generation; text commands can also reply to any Telegram photo to use that photo as the reference
 - log-only usage observability with production JSON logs, local text logs by default, and optional config-driven cost estimates for chat, image, and video generation
@@ -74,7 +73,7 @@ The runtime is split so Telegram transport stays separate from domain and provid
 - `app/api/`: `healthz`, `readyz`, and webhook ingestion
 - `app/telegram/`: polling runtime, handlers, normalization, formatting, media delivery, and drafts
 - `app/domain/`: commands, models, interfaces, and orchestration in `ChatService`
-- `app/providers/`: OpenAI chat plus Vertex image/video, Runpod video, and video provider routing adapters
+- `app/providers/`: OpenAI chat plus Vertex image/video, Runpod video, Fal video, and video provider routing adapters
 - `app/storage/`: SQLite schema and repositories for conversations, messages, generated images, generation jobs, and user preferences
 - `app/workers/`: background polling worker for queued video jobs
 
@@ -86,6 +85,7 @@ The runtime is split so Telegram transport stays separate from domain and provid
 - an OpenAI API key for chat replies
 - Vertex configuration for `/image` and default `/video`
 - optional Runpod configuration for `/video` fallback and `/video_ltx`
+- optional Fal configuration for `/video` provider expansion
 
 ## Quick Start
 
@@ -379,7 +379,7 @@ Reference-image commands:
 Settings presets:
 
 - `/settings` stores preferences per `chat_id` and `user_id`; missing preferences use the environment defaults
-- video settings can independently choose provider, duration, and aspect ratio/orientation
+- video settings can independently choose provider, Fal model family (when multiple families are configured), duration, and aspect ratio/orientation
 - Runpod settings can choose LTX pipeline, two-stage quality, fixed or random seed, and reference-image strength
 - image presets can choose the image model, aspect ratio, and output MIME type
 - chat presets can choose creativity, response length, and memory depth
@@ -393,7 +393,7 @@ Run the test suite:
 uv run pytest
 ```
 
-The repository already includes tests for health and readiness, normalization, allowlist handling, history reuse, reset behavior, draft streaming and fallback, Telegram formatting, image generation, reference-image command captions and reply-to-photo commands, video job handling, Vertex provider flows, Runpod provider flows, and video provider routing.
+The repository already includes tests for health and readiness, normalization, allowlist handling, history reuse, reset behavior, draft streaming and fallback, Telegram formatting, image generation, reference-image command captions and reply-to-photo commands, video job handling, Vertex provider flows, Runpod provider flows, Fal provider flows, video provider routing, Fal family settings, and runtime callback validation.
 
 ## Project Layout
 
@@ -418,4 +418,5 @@ uv.lock
 
 - distributed workers and external job queues are out of scope today
 - per-user/per-chat quotas, daily media budget caps, prompt/reference-image moderation gates, and in-app provider-output URL retention/expiry handling were deferred out of completed Phase 4 and remain future work unless the roadmap changes
-- Fal-hosted video provider support is in progress for `Phase 6 - Fal Video Provider Support` in a separate worktree from `Phase 5 - ElevenLabs Hindi Text To Speech`, as an expansion of the existing queued `/video` provider path with likely Kling 3 and Seedance 2 presets
+- Fal-hosted video provider support is accepted as complete and merged into `dev` for `Phase 6 - Fal Video Provider Support`, with Kling, Seedance, and Gemini Omni Flash model families available behind the existing queued `/video` path and per-family selection in `/settings`
+- Phase 5 ElevenLabs Hindi text-to-speech remains in progress in a separate worktree
