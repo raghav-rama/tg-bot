@@ -9,3 +9,4 @@ data/
 .envrc
 service-account.json
 .DS_Store
+.omo/
