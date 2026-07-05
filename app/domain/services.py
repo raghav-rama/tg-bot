@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
-from app.config import Settings
+from app.config import Settings, _fal_family_for_model
 from app.domain.commands import (
     ACCESS_DENIED_TEXT,
     EMPTY_TEXT_TEXT,
@@ -55,6 +55,7 @@ from app.domain.preferences import (
     UNKNOWN_SETTINGS_TEXT,
     active_settings_summary,
     chat_preset_for,
+    fal_video_model_preset_for,
     image_preset_for,
     parse_settings_callback,
     preset_for_preference,
@@ -359,10 +360,14 @@ class ChatService:
                 user_id=user_id,
             )
             return ServiceReply(
-                text=active_settings_summary(preferences=preferences),
+                text=active_settings_summary(
+                    preferences=preferences,
+                    settings=self.settings,
+                ),
                 settings_menu=settings_menu_for(
                     preference_type=preference_type,
                     active_preset_id=preset_id,
+                    settings=self.settings,
                 ),
             )
 
@@ -379,11 +384,15 @@ class ChatService:
             text=(
                 SETTINGS_TEXT
                 if preference_type is None
-                else active_settings_summary(preferences=preferences)
+                else active_settings_summary(
+                    preferences=preferences,
+                    settings=self.settings,
+                )
             ),
             settings_menu=settings_menu_for(
                 preference_type=preference_type,
                 active_preset_id=active_preset_id,
+                settings=self.settings,
             ),
         )
 
@@ -416,9 +425,59 @@ class ChatService:
         )
         if preference is None:
             return None
-        if preset_for_preference(preference_type, preference.preset_id) is None:
+        if (
+            preset_for_preference(
+                preference_type,
+                preference.preset_id,
+                settings=self.settings,
+            )
+            is None
+        ):
             return None
         return preference
+
+    async def _fal_video_family_for_user(
+        self,
+        *,
+        chat_id: int,
+        user_id: int,
+        has_reference_image: bool = False,
+    ) -> str:
+        preference = await self._preference_for_user(
+            chat_id=chat_id,
+            user_id=user_id,
+            preference_type="fal_video_model",
+        )
+        if preference is not None:
+            family = preference.preset_id
+            if family in self.settings.fal_video_available_families:
+                return family
+            self.logger.warning(
+                log_kv(
+                    "fal_video_family_unavailable",
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    requested_family=family,
+                    available_families=sorted(
+                        self.settings.fal_video_available_families
+                    ),
+                )
+            )
+        # If no preference is set, derive a sensible family from the configured
+        # mode-specific endpoints so that text/image/reference requests use a
+        # matching endpoint without requiring the user to open /settings first.
+        if has_reference_image:
+            for model in (
+                self.settings.fal_video_reference_to_video_model,
+                self.settings.fal_video_image_to_video_model,
+            ):
+                if model:
+                    return _fal_family_for_model(model)
+        text_model = (
+            self.settings.fal_video_text_to_video_model
+            or self.settings.fal_video_model
+        )
+        return _fal_family_for_model(text_model)
 
     async def _begin_run(self, chat_id: int) -> _ActiveRun:
         new_run = _ActiveRun()
@@ -497,17 +556,20 @@ class ChatService:
                 chat_id=message.chat_id,
                 user_id=message.user_id,
             )
-            reply_text = f"{reply_text}\n\n{active_settings_summary(preferences=preferences)}"
+            reply_text = f"{reply_text}\n\n{active_settings_summary(preferences=preferences, settings=self.settings)}"
         elif command == "/settings":
             preferences = await self._preferences_for_user(
                 chat_id=message.chat_id,
                 user_id=message.user_id,
             )
-            reply_text = active_settings_summary(preferences=preferences)
+            reply_text = active_settings_summary(
+                preferences=preferences,
+                settings=self.settings,
+            )
             await self._persist_command_exchange(conversation, message, reply_text)
             return ServiceReply(
                 text=reply_text,
-                settings_menu=settings_menu_for(),
+                settings_menu=settings_menu_for(settings=self.settings),
             )
         elif command == "/image":
             return await self._handle_image_command(
@@ -795,15 +857,17 @@ class ChatService:
 
         requested_model: str | None = None
         requested_resolution: str | None = None
+        requested_fal_family: str | None = None
         if requested_provider == "fal":
-            if message.image is not None:
-                requested_model = (
-                    self.settings.fal_video_reference_to_video_model
-                    or self.settings.fal_video_image_to_video_model
-                    or self.settings.fal_video_model
-                )
-            else:
-                requested_model = self.settings.fal_video_model
+            requested_fal_family = await self._fal_video_family_for_user(
+                chat_id=message.chat_id,
+                user_id=message.user_id,
+                has_reference_image=message.image is not None,
+            )
+            requested_model = self.settings.fal_video_model_for_mode(
+                requested_fal_family,
+                has_reference_image=message.image is not None,
+            )
             requested_resolution = self.settings.fal_video_resolution
             model_locked = True
         elif requested_provider == "runpod":
@@ -820,10 +884,6 @@ class ChatService:
                 )
             if message.image is not None and reference_strength_preset is not None:
                 requested_image_strength = reference_strength_preset.image_strength
-            requested_model = requested_model or self._video_model_for_provider(
-                requested_provider
-            )
-        elif requested_provider == "fal":
             requested_model = requested_model or self._video_model_for_provider(
                 requested_provider
             )

@@ -336,7 +336,7 @@ async def test_submit_gemini_image_to_video_uses_image_url() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gemini_image_to_video_omits_unsupported_aspect_ratio() -> None:
+async def test_gemini_image_to_video_coerces_unsupported_aspect_ratio() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -360,7 +360,7 @@ async def test_gemini_image_to_video_omits_unsupported_aspect_ratio() -> None:
     payload = json.loads(requests[0].content)
     assert payload["prompt"] == "tracking shot through a glowing cave"
     assert payload["duration"] == 5
-    assert "aspect_ratio" not in payload
+    assert payload["aspect_ratio"] == "9:16"
     assert payload["image_url"] == (
         "data:image/jpeg;base64,"
         + base64.b64encode(b"reference-image").decode("ascii")

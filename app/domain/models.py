@@ -10,11 +10,13 @@ ChatType = Literal["private", "group", "supergroup", "channel"]
 GenerationJobStatus = Literal["queued", "running", "completed", "failed"]
 VideoProviderName = Literal["vertex", "runpod", "fal"]
 VideoProviderHint = Literal["auto", "vertex", "runpod", "fal"]
+FalVideoModelFamily = Literal["kling", "seedance", "gemini"]
 PreferenceType = Literal[
     "video",
     "video_provider",
     "video_duration",
     "video_orientation",
+    "fal_video_model",
     "runpod_pipeline",
     "runpod_quality",
     "runpod_seed",

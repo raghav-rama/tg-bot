@@ -140,9 +140,9 @@ VERTEX_API_KEY=your-vertex-api-key
 
 # Optional Fal video provider for /video
 # FAL_API_KEY=your-fal-api-key
-# FAL_VIDEO_MODEL=fal-ai/kling-video/v3/standard/text-to-video
-# FAL_VIDEO_IMAGE_TO_VIDEO_MODEL=fal-ai/kling-video/v3/standard/image-to-video
-# FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL=bytedance/seedance-2.0/reference-to-video
+# FAL_VIDEO_TEXT_TO_VIDEO_MODEL=fal-ai/google/gemini-omni-flash
+# FAL_VIDEO_IMAGE_TO_VIDEO_MODEL=fal-ai/google/gemini-omni-flash/image-to-video
+# FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL=fal-ai/google/gemini-omni-flash/reference-to-video
 # FAL_VIDEO_RESOLUTION=720p
 
 # Optional Runpod LTX fallback for /video and manual /video_ltx
@@ -254,7 +254,8 @@ Fal video settings:
 
 - `FAL_API_KEY`: required to enable Fal video generation
 - `FAL_VIDEO_BASE_URL`: default `https://queue.fal.run`
-- `FAL_VIDEO_MODEL`: default `fal-ai/kling-video/v3/standard/text-to-video`
+- `FAL_VIDEO_MODEL`: default text-to-video endpoint, default `fal-ai/kling-video/v3/standard/text-to-video`
+- `FAL_VIDEO_TEXT_TO_VIDEO_MODEL`: optional override for the text-to-video endpoint; if set, it takes precedence over `FAL_VIDEO_MODEL`
 - `FAL_VIDEO_IMAGE_TO_VIDEO_MODEL`: optional image-to-video endpoint (e.g. `fal-ai/kling-video/v3/standard/image-to-video`)
 - `FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL`: optional reference-to-video endpoint (e.g. `bytedance/seedance-2.0/reference-to-video`)
 - `FAL_VIDEO_EDIT_MODEL`: optional video-to-video endpoint (requires future video-input support)
@@ -263,10 +264,11 @@ Fal video settings:
 - `FAL_VIDEO_COST_PER_SECOND_USD`: optional log-only estimate rate, default `0`
 - `FAL_VIDEO_SUBMIT_TIMEOUT_SECONDS`: HTTP timeout for submit/status calls, default `45`
 
-Supported Fal model families include Kling (`fal-ai/kling-video`), Seedance 2.0 (`bytedance/seedance-2.0`), and Gemini Omni Flash (`google/gemini-omni-flash`). The `/video` command dispatches to the configured per-mode endpoint:
+Supported Fal model families include Kling (`fal-ai/kling-video`), Seedance 2.0 (`bytedance/seedance-2.0`), and Gemini Omni Flash (`google/gemini-omni-flash`). The bot infers which families are available from the configured endpoints. When more than one family is available, the `/settings` menu shows a **Fal model** option so users can pick Kling, Seedance, or Gemini per chat. The chosen family is then mapped to the right mode-specific endpoint:
 
-- text-only `/video` uses `FAL_VIDEO_MODEL`
-- `/video` with a reference photo uses `FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL` if set, otherwise `FAL_VIDEO_IMAGE_TO_VIDEO_MODEL`, otherwise falls back to text-to-video
+- text-only `/video` uses `FAL_VIDEO_TEXT_TO_VIDEO_MODEL` or `FAL_VIDEO_MODEL`
+- `/video` with a reference photo looks for a matching-family reference-to-video endpoint, then image-to-video, then falls back to the text-to-video endpoint for that family
+- unsupported aspect ratios for Gemini are coerced to `9:16`
 
 Runpod video settings:
 

@@ -104,14 +104,19 @@ class FalVideoProvider:
             reference_image is not None
             and reference_image.byte_size <= self.reference_image_max_bytes
         )
-        selected = self.default_model
-        if image_usable:
-            if self.reference_to_video_model:
-                selected = self.reference_to_video_model
-            elif self.image_to_video_model:
-                selected = self.image_to_video_model
-        elif request.model and not request.model_locked:
+
+        if request.model and request.model_locked:
             selected = request.model
+        else:
+            selected = self.default_model
+            if image_usable:
+                if self.reference_to_video_model:
+                    selected = self.reference_to_video_model
+                elif self.image_to_video_model:
+                    selected = self.image_to_video_model
+            elif request.model:
+                selected = request.model
+
         request_mode = _mode_for_model(request.model or selected)
         if not image_usable and request_mode in {
             "image-to-video",
@@ -416,6 +421,11 @@ def _aspect_or_resolution_payload(
     if family == "kling":
         if mode in {"text-to-video", "reference-to-video"} and request.aspect_ratio:
             return {"aspect_ratio": request.aspect_ratio}
-    if family == "gemini" and request.aspect_ratio in {"16:9", "9:16"}:
-        return {"aspect_ratio": request.aspect_ratio}
+    if family == "gemini":
+        # Gemini only supports a 16:9 or 9:16 aspect ratio; coerce unsupported values
+        # silently rather than letting the provider reject the request.
+        aspect_ratio = request.aspect_ratio
+        if aspect_ratio not in {"16:9", "9:16"}:
+            aspect_ratio = "9:16"
+        return {"aspect_ratio": aspect_ratio}
     return {}

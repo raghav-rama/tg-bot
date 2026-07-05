@@ -10,6 +10,25 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.providers.vertex_image_models import requires_global_location
 
+
+class _FalModelFamilyHelper:
+    """Helpers for mapping a concrete Fal endpoint to a family label."""
+
+    @staticmethod
+    def from_model(model: str) -> str:
+        lower = model.lower()
+        if "kling" in lower:
+            return "kling"
+        if "seedance" in lower:
+            return "seedance"
+        if "gemini" in lower or "google" in lower:
+            return "gemini"
+        return "other"
+
+
+def _fal_family_for_model(model: str) -> str:
+    return _FalModelFamilyHelper.from_model(model)
+
 DEFAULT_SYSTEM_PROMPT = (
     "You are a concise assistant for a YouTube channel workflow. "
     "Help brainstorm content ideas, titles, hooks, and clear answers. "
@@ -188,6 +207,10 @@ class Settings(BaseSettings):
     fal_video_model: str = Field(
         default="fal-ai/kling-video/v3/standard/text-to-video",
         alias="FAL_VIDEO_MODEL",
+    )
+    fal_video_text_to_video_model: str | None = Field(
+        default=None,
+        alias="FAL_VIDEO_TEXT_TO_VIDEO_MODEL",
     )
     fal_video_image_to_video_model: str | None = Field(
         default=None,
@@ -498,6 +521,63 @@ class Settings(BaseSettings):
     @property
     def fal_video_generation_enabled(self) -> bool:
         return self.fal_api_key is not None
+
+    @property
+    def fal_video_available_families(self) -> set[str]:
+        """Families detected from all configured Fal mode endpoints."""
+        families: set[str] = set()
+        for model in (
+            self.fal_video_text_to_video_model or self.fal_video_model,
+            self.fal_video_image_to_video_model,
+            self.fal_video_reference_to_video_model,
+            self.fal_video_edit_model,
+        ):
+            if model:
+                families.add(_fal_family_for_model(model))
+        return families
+
+    @property
+    def fal_video_default_family(self) -> str:
+        """Infer the default family from the configured text-to-video endpoint."""
+        text_model = self.fal_video_text_to_video_model or self.fal_video_model
+        family = _fal_family_for_model(text_model)
+        available = self.fal_video_available_families
+        if family in available:
+            return family
+        return next(iter(available), "kling")
+
+    def fal_video_model_for_mode(
+        self,
+        family: str,
+        *,
+        has_reference_image: bool = False,
+    ) -> str:
+        """Return the concrete Fal endpoint for a family and input mode."""
+        family = family.lower()
+        candidates: list[str | None] = []
+
+        if has_reference_image:
+            candidates.extend(
+                [
+                    self.fal_video_reference_to_video_model,
+                    self.fal_video_image_to_video_model,
+                ]
+            )
+
+        candidates.extend(
+            [
+                self.fal_video_text_to_video_model,
+                self.fal_video_model,
+            ]
+        )
+
+        for candidate in candidates:
+            if candidate and _fal_family_for_model(candidate) == family:
+                return candidate
+
+        # Last resort: fallback to the default text-to-video endpoint even if the
+        # family does not match, so the request is still submitted.
+        return self.fal_video_text_to_video_model or self.fal_video_model
 
     @property
     def video_generation_enabled(self) -> bool:

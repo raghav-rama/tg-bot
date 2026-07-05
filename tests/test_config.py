@@ -513,6 +513,74 @@ def test_webhook_url_must_be_https(tmp_path, monkeypatch) -> None:
         )
 
 
+def test_fal_video_family_detection_from_mode_endpoints(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        FAL_API_KEY="test-fal-key",
+        FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/google/gemini-omni-flash",
+        FAL_VIDEO_IMAGE_TO_VIDEO_MODEL="fal-ai/google/gemini-omni-flash/image-to-video",
+        FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL="fal-ai/google/gemini-omni-flash/reference-to-video",
+    )
+
+    assert settings.fal_video_available_families == {"gemini"}
+    assert settings.fal_video_default_family == "gemini"
+    assert settings.fal_video_model_for_mode("gemini") == "fal-ai/google/gemini-omni-flash"
+    assert (
+        settings.fal_video_model_for_mode("gemini", has_reference_image=True)
+        == "fal-ai/google/gemini-omni-flash/reference-to-video"
+    )
+
+
+def test_fal_video_model_for_mode_falls_back_to_text_model(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        FAL_API_KEY="test-fal-key",
+        FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/google/gemini-omni-flash",
+    )
+
+    assert settings.fal_video_model_for_mode("gemini", has_reference_image=True) == (
+        "fal-ai/google/gemini-omni-flash"
+    )
+
+
+def test_fal_video_available_families_includes_multiple_families(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        FAL_API_KEY="test-fal-key",
+        FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/kling-video/v3/standard/text-to-video",
+        FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL="bytedance/seedance-2.0/reference-to-video",
+    )
+
+    assert settings.fal_video_available_families == {"kling", "seedance"}
+
+
 def test_webhook_secret_token_is_restricted_to_telegram_charset(
     tmp_path,
     monkeypatch,

@@ -186,6 +186,7 @@ New environment variables in `app/config.py`:
 | `FAL_API_KEY` | `SecretStr` | `None` | Required if `VIDEO_PROVIDER_ORDER` includes `fal` |
 | `FAL_VIDEO_BASE_URL` | `str` | `https://queue.fal.run` | Queue API base URL |
 | `FAL_VIDEO_MODEL` | `str` | `fal-ai/kling-video/v3/standard/text-to-video` | Default text-to-video endpoint |
+| `FAL_VIDEO_TEXT_TO_VIDEO_MODEL` | `str \| None` | `None` | Optional override for the text-to-video endpoint |
 | `FAL_VIDEO_IMAGE_TO_VIDEO_MODEL` | `str \| None` | `None` | Optional image-to-video endpoint |
 | `FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL` | `str \| None` | `None` | Optional reference-to-video endpoint |
 | `FAL_VIDEO_EDIT_MODEL` | `str \| None` | `None` | Optional video-to-video endpoint (future use) |
@@ -195,6 +196,8 @@ New environment variables in `app/config.py`:
 | `FAL_VIDEO_SUBMIT_TIMEOUT_SECONDS` | `int` | `45` | HTTP timeout for submit/status calls |
 
 `VIDEO_PROVIDER_ORDER` now accepts `fal` in addition to `vertex` and `runpod`.
+
+The bot detects available model families from the configured endpoints. When more than one family is configured, users can choose a family via the `/settings` **Fal model** option.
 
 ## Code Changes
 
