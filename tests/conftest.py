@@ -173,7 +173,7 @@ def build_settings(database_path: Path, **overrides) -> Settings:
         "VIDEO_JOB_POLL_INTERVAL_SECONDS": "15",
     }
     values.update(overrides)
-    return Settings(**values)
+    return Settings(_env_file=None, **values)
 
 
 @pytest_asyncio.fixture
