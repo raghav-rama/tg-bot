@@ -42,6 +42,7 @@ class FalVideoProvider:
         self.reference_to_video_model = reference_to_video_model
         self.edit_model = edit_model
         self.reference_image_max_bytes = reference_image_max_bytes
+        self._request_urls: dict[str, dict[str, str]] = {}
         if client is not None:
             self._client = client
         else:
@@ -75,6 +76,13 @@ class FalVideoProvider:
             raise ProviderUpstreamError(
                 "Fal video generation returned no request_id"
             )
+        status_url = response_body.get("status_url")
+        response_url = response_body.get("response_url")
+        if isinstance(status_url, str) and status_url:
+            self._request_urls[request_id] = {
+                "status_url": status_url,
+                "response_url": response_url if isinstance(response_url, str) else "",
+            }
         self.logger.info(
             log_kv(
                 "fal_video_submit_succeeded",
@@ -172,14 +180,30 @@ class FalVideoProvider:
         self,
         request: VideoGenerationPollRequest,
     ) -> VideoJobPollResult:
-        model = request.model or self.default_model
-        status_url = f"{self.base_url}/{model}/requests/{request.operation_name}/status"
+        model = request.model
+        urls = self._request_urls.get(request.operation_name)
+        if urls is None or not urls.get("status_url"):
+            self.logger.warning(
+                log_kv(
+                    "fal_video_poll_urls_missing",
+                    operation_name=request.operation_name,
+                    model=model,
+                )
+            )
+        status_url = (urls or {}).get("status_url") or (
+            f"{self.base_url}/{model}/requests/{request.operation_name}/status"
+        )
+        response_url = (urls or {}).get("response_url") or (
+            f"{self.base_url}/{model}/requests/{request.operation_name}/response"
+        )
 
         self.logger.debug(
             log_kv(
                 "fal_video_poll_started",
                 operation_name=request.operation_name,
                 model=model,
+                status_url=status_url,
+                response_url=response_url,
             )
         )
 
@@ -208,8 +232,7 @@ class FalVideoProvider:
                 failure_reason=f"Fal video generation returned unknown status: {status}",
             )
 
-        result_url = f"{self.base_url}/{model}/requests/{request.operation_name}/response"
-        result_response = await self._request("GET", result_url)
+        result_response = await self._request("GET", response_url)
         result_body = self._json_body(result_response)
 
         video = result_body.get("video")
