@@ -43,7 +43,7 @@ class VertexVideoProvider:
         ) = None,
     ) -> None:
         self.logger = logging.getLogger("app.providers.vertex_video_provider")
-        self._auth_mode = "adc" if project else ("api_key" if api_key is not None else "adc")
+        self._auth_mode = "api_key" if api_key is not None else ("adc" if project else "adc")
         self._project = project
         self._default_model = default_model
         self._default_aspect_ratio = default_aspect_ratio
@@ -87,18 +87,15 @@ class VertexVideoProvider:
         project: str,
         location: str,
     ) -> dict[str, Any]:
-        if project:
-            return {
-                "vertexai": True,
-                "project": project,
-                "location": location,
-            }
-
         client_kwargs: dict[str, Any] = {
             "vertexai": True,
         }
         if api_key is not None:
             client_kwargs["api_key"] = api_key
+            return client_kwargs
+        if project:
+            client_kwargs["project"] = project
+            client_kwargs["location"] = location
         return client_kwargs
 
     async def submit_video(

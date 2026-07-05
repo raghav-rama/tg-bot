@@ -333,7 +333,7 @@ async def test_settings_callback_accepts_fal_model_from_runtime_settings(service
     service = service_bundle["service"]
     preferences = service_bundle["preferences"]
 
-    service.settings.fal_api_key = SecretStr("test-fal-key")
+    service.settings.fal_key = SecretStr("test-fal-key")
     service.settings.fal_video_text_to_video_model = "fal-ai/kling-video/v3/standard/text-to-video"
     service.settings.fal_video_reference_to_video_model = (
         "bytedance/seedance-2.0/reference-to-video"

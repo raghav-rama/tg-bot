@@ -136,14 +136,16 @@ VERTEX_API_KEY=your-vertex-api-key
 
 # Optional log-only cost estimates; keep unset or 0 to disable.
 # VERTEX_IMAGE_COST_PER_IMAGE_USD=0
+# VERTEX_IMAGE_TIMEOUT_SECONDS=120
 # VERTEX_VIDEO_COST_PER_SECOND_USD=0
 
 # Optional Fal video provider for /video
-# FAL_API_KEY=your-fal-api-key
+# FAL_KEY=your-fal-api-key
 # FAL_VIDEO_TEXT_TO_VIDEO_MODEL=fal-ai/google/gemini-omni-flash
 # FAL_VIDEO_IMAGE_TO_VIDEO_MODEL=fal-ai/google/gemini-omni-flash/image-to-video
 # FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL=fal-ai/google/gemini-omni-flash/reference-to-video
 # FAL_VIDEO_RESOLUTION=720p
+# FAL_CLIENT_TIMEOUT_SECONDS=45
 
 # Optional Runpod LTX fallback for /video and manual /video_ltx
 # RUNPOD_API_KEY=your-runpod-api-key
@@ -161,7 +163,7 @@ VERTEX_API_KEY=your-vertex-api-key
 # RUNPOD_VIDEO_COST_PER_SECOND_USD=0
 
 # Example video provider order. Default is "vertex,runpod".
-# Add "fal" only when FAL_API_KEY is configured, e.g.:
+# Add "fal" only when FAL_KEY is configured, e.g.:
 # VIDEO_PROVIDER_ORDER=vertex,runpod,fal
 # VERTEX_VIDEO_ASPECT_RATIO=9:16
 # RUNPOD_VIDEO_ENDPOINT_ID=your-runpod-serverless-endpoint-id
@@ -229,12 +231,14 @@ Vertex image settings:
 - `VERTEX_IMAGE_MODEL`
 - `VERTEX_IMAGE_ASPECT_RATIO`
 - `VERTEX_IMAGE_OUTPUT_MIME_TYPE`
+- `VERTEX_IMAGE_TIMEOUT_SECONDS`: `/image` provider timeout in seconds, default `120`
 - `VERTEX_IMAGE_COST_PER_IMAGE_USD`: optional log-only estimate rate, default `0`
 
 Image model notes:
 
 - Imagen remains the default `/image` model path and uses the dedicated Vertex `generate_images` API.
 - Gemini image models are supported through the Vertex `generate_content` API.
+- Slow image-generation calls now time out through `VERTEX_IMAGE_TIMEOUT_SECONDS` instead of hanging indefinitely.
 - `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`.
 - To use a Telegram photo as a reference image, send the photo with a caption like `/image restyle this as a pencil sketch`, or reply to any Telegram photo with `/image <prompt>`; this requires a Gemini image model.
 
@@ -252,8 +256,7 @@ Vertex video settings:
 
 Fal video settings:
 
-- `FAL_API_KEY`: required to enable Fal video generation
-- `FAL_VIDEO_BASE_URL`: default `https://queue.fal.run`
+- `FAL_KEY`: required to enable Fal video generation
 - `FAL_VIDEO_MODEL`: default text-to-video endpoint, default `fal-ai/kling-video/v3/standard/text-to-video`
 - `FAL_VIDEO_TEXT_TO_VIDEO_MODEL`: optional override for the text-to-video endpoint; if set, it takes precedence over `FAL_VIDEO_MODEL`
 - `FAL_VIDEO_IMAGE_TO_VIDEO_MODEL`: optional image-to-video endpoint (e.g. `fal-ai/kling-video/v3/standard/image-to-video`)
@@ -262,12 +265,13 @@ Fal video settings:
 - `FAL_VIDEO_RESOLUTION`: Seedance resolution preset, default `720p`
 - `FAL_VIDEO_REFERENCE_IMAGE_MAX_BYTES`: default `6000000`
 - `FAL_VIDEO_COST_PER_SECOND_USD`: optional log-only estimate rate, default `0`
-- `FAL_VIDEO_SUBMIT_TIMEOUT_SECONDS`: HTTP timeout for submit/status calls, default `45`
+- `FAL_CLIENT_TIMEOUT_SECONDS`: Fal SDK client and upload/download timeout, default `45`
 
-Supported Fal model families include Kling (`fal-ai/kling-video`), Seedance 2.0 (`bytedance/seedance-2.0`), and Gemini Omni Flash (`google/gemini-omni-flash`). The bot infers which families are available from the configured endpoints. When more than one family is available, the `/settings` menu shows a **Fal model** option so users can pick Kling, Seedance, or Gemini per chat. The chosen family is then mapped to the right mode-specific endpoint:
+Supported Fal model families include Kling (`fal-ai/kling-video`), Seedance 2.0 (`bytedance/seedance-2.0`), and Gemini Omni Flash (`google/gemini-omni-flash`). The bot infers which families are available from the configured endpoints. When more than one family is available, the `/settings` menu shows a **Fal model** option so users can pick Kling, Seedance, or Gemini per chat. The chosen family is then mapped to the right mode-specific endpoint, and usable reference photos are uploaded through the official `fal-client` SDK before the mode-specific Fal argument (`start_image_url`, `image_url`, or `image_urls`) is sent:
 
 - text-only `/video` uses `FAL_VIDEO_TEXT_TO_VIDEO_MODEL` or `FAL_VIDEO_MODEL`
 - `/video` with a reference photo looks for a matching-family reference-to-video endpoint, then image-to-video, then falls back to the text-to-video endpoint for that family
+- oversized reference photos are omitted and logged before the request falls back to the configured text-to-video endpoint
 - unsupported aspect ratios for Gemini are coerced to `9:16`
 
 Runpod video settings:

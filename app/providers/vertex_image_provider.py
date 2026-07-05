@@ -23,10 +23,12 @@ class VertexImageProvider:
         client: Any | None = None,
         types_module: Any | None = None,
         api_error_type: type[Exception] | None = None,
+        timeout_seconds: float | None = 120.0,
     ) -> None:
         self._default_model = default_model
         self._default_aspect_ratio = default_aspect_ratio
         self._default_output_mime_type = default_output_mime_type
+        self._timeout_seconds = timeout_seconds
 
         if client is not None:
             self._client = client
@@ -59,18 +61,15 @@ class VertexImageProvider:
         project: str,
         location: str,
     ) -> dict[str, Any]:
-        if project:
-            return {
-                "vertexai": True,
-                "project": project,
-                "location": location,
-            }
-
         client_kwargs: dict[str, Any] = {
             "vertexai": True,
         }
         if api_key is not None:
             client_kwargs["api_key"] = api_key
+            return client_kwargs
+        if project:
+            client_kwargs["project"] = project
+            client_kwargs["location"] = location
         return client_kwargs
 
     async def close(self) -> None:
@@ -88,7 +87,15 @@ class VertexImageProvider:
                 "Reference image generation requires a Gemini image model"
             )
         try:
-            response = await asyncio.to_thread(self._generate_image_sync, request)
+            generation = asyncio.to_thread(self._generate_image_sync, request)
+            if self._timeout_seconds is not None:
+                response = await asyncio.wait_for(
+                    generation, timeout=self._timeout_seconds
+                )
+            else:
+                response = await generation
+        except asyncio.TimeoutError as exc:
+            raise ProviderTimeoutError("Vertex image generation timed out") from exc
         except Exception as exc:
             if self._api_error_type is not None and isinstance(exc, self._api_error_type):
                 error_code = getattr(exc, "code", None)

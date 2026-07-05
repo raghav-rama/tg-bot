@@ -45,30 +45,26 @@ Let the existing queued `/video` flow use Fal-hosted video models as an addition
 4. **Optional Fal edit model**: configured via `FAL_VIDEO_EDIT_MODEL`. Not reachable from `/video` until video-input support is added.
 5. **Provider identifier in jobs**: `provider="fal"`; the exact Fal endpoint path is stored in the `model` column of `generation_jobs`.
 6. **Settings exposure**: `"fal"` is selectable as a video provider in `/settings`. Exact model selection remains environment-only.
-7. **Reference-image handling**: encode Telegram photo bytes as a base64 data URI. If the image exceeds `FAL_VIDEO_REFERENCE_IMAGE_MAX_BYTES`, omit it and log; otherwise route to the configured reference-to-video or image-to-video model.
+7. **Reference-image handling**: upload Telegram photo bytes through the official `fal-client` SDK. If the image exceeds `FAL_VIDEO_REFERENCE_IMAGE_MAX_BYTES`, omit it and log; otherwise route to the configured reference-to-video or image-to-video model using the uploaded Fal CDN URL.
 8. **No new fallback**: Fal failures do not trigger Vertex/Runpod fallback. The existing Vertex-safety -> Runpod fallback remains untouched.
 9. **Polling policy**: Phase 6 uses polling against the queue status/result endpoints. Fal webhooks are out of scope.
 10. **Raw bytes policy**: completed Fal output URLs are downloaded only for Telegram delivery; raw bytes and temporary URLs are not persisted in SQLite.
 
-## Fal REST Queue Contract
+## Fal SDK Queue Contract
 
-All requests use base URL `https://queue.fal.run` (overridable via `FAL_VIDEO_BASE_URL`).
-
-Authentication header:
-
-```http
-Authorization: Key {FAL_API_KEY}
-```
+The implementation now uses the official Python `fal-client` SDK for queue submission, request-handle recreation, polling, result retrieval, and reference-image upload. The SDK authenticates with `FAL_KEY` and manages the queue host internally.
 
 ### Submit
 
-```http
-POST https://queue.fal.run/{model_id}
-Content-Type: application/json
-Authorization: Key {FAL_API_KEY}
-```
+Runtime flow:
 
-Body shape depends on model family and mode:
+1. Build the family-specific Fal input payload from the normalized `VideoGenerationRequest`.
+2. If a usable Telegram reference image is present, decode the bytes and upload them through `fal_client.AsyncClient.upload(...)`.
+3. Replace the family-specific image field with the returned Fal CDN URL (`start_image_url`, `image_url`, or `image_urls`).
+4. Submit the queued request through `fal_client.AsyncClient.submit(model_id, arguments=payload)`.
+5. Persist only the returned `request_id` plus the selected Fal model endpoint.
+
+Body shape still depends on model family and mode:
 
 **Kling text-to-video**
 
@@ -85,7 +81,7 @@ Body shape depends on model family and mode:
 ```json
 {
   "prompt": "...",
-  "start_image_url": "data:image/jpeg;base64,...",
+  "start_image_url": "https://fal.media/...",
   "duration": "5"
 }
 ```
@@ -95,7 +91,7 @@ Body shape depends on model family and mode:
 ```json
 {
   "prompt": "...",
-  "image_url": "data:image/jpeg;base64,...",
+  "image_url": "https://fal.media/...",
   "duration": 8,
   "aspect_ratio": "16:9" | "9:16"
 }
@@ -112,70 +108,27 @@ Body shape depends on model family and mode:
 }
 ```
 
-**Seedance 2.0 image-to-video**
-
-```json
-{
-  "prompt": "...",
-  "image_url": "data:image/jpeg;base64,...",
-  "duration": "5",
-  "resolution": "720p",
-  "aspect_ratio": "9:16"
-}
-```
-
 **Reference-to-video**
 
 ```json
 {
   "prompt": "...",
-  "image_urls": ["data:image/jpeg;base64,..."],
+  "image_urls": ["https://fal.media/..."],
   "duration": "5" | 8,
   "aspect_ratio": "9:16" | "16:9" | "resolution": "720p"
 }
 ```
 
-Response:
+### Poll And Result
 
-```json
-{ "request_id": "..." }
-```
+Polling flow:
 
-### Status
+1. Recreate the queued request handle after restart with `fal_client.AsyncClient.get_handle(model_id, request_id)`.
+2. Call `await handle.status(with_logs=False)` to classify `Queued`, `InProgress`, or `Completed`.
+3. When completed, call `await handle.get()` to fetch the model-specific result payload.
+4. Download the returned `video.url` through `httpx` for Telegram delivery only.
 
-```http
-GET https://queue.fal.run/{model_id}/requests/{request_id}/status
-Authorization: Key {FAL_API_KEY}
-```
-
-Status values:
-
-- `IN_QUEUE` -> running
-- `IN_PROGRESS` -> running
-- `COMPLETED` -> completed
-- any `error` / `error_type` field -> failed
-
-### Result
-
-```http
-GET https://queue.fal.run/{model_id}/requests/{request_id}
-Authorization: Key {FAL_API_KEY}
-```
-
-Success response:
-
-```json
-{
-  "video": {
-    "url": "https://.../output.mp4",
-    "file_size": 1234567,
-    "file_name": "output.mp4",
-    "content_type": "video/mp4"
-  }
-}
-```
-
-The adapter downloads `video.url` via `httpx` and returns the bytes as a `GeneratedVideoResult`.
+The adapter still returns `VideoJobPollResult(status="running")` for queued/in-progress work, `status="failed"` for queue/result errors, and `status="completed"` only after the final asset bytes have been fetched successfully.
 
 ## Configuration
 
@@ -183,17 +136,16 @@ New environment variables in `app/config.py`:
 
 | Env Var | Type | Default | Purpose |
 |---------|------|---------|---------|
-| `FAL_API_KEY` | `SecretStr` | `None` | Required if `VIDEO_PROVIDER_ORDER` includes `fal` |
-| `FAL_VIDEO_BASE_URL` | `str` | `https://queue.fal.run` | Queue API base URL |
+| `FAL_KEY` | `SecretStr` | `None` | Required if `VIDEO_PROVIDER_ORDER` includes `fal` |
 | `FAL_VIDEO_MODEL` | `str` | `fal-ai/kling-video/v3/standard/text-to-video` | Default text-to-video endpoint |
 | `FAL_VIDEO_TEXT_TO_VIDEO_MODEL` | `str \| None` | `None` | Optional override for the text-to-video endpoint |
 | `FAL_VIDEO_IMAGE_TO_VIDEO_MODEL` | `str \| None` | `None` | Optional image-to-video endpoint |
 | `FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL` | `str \| None` | `None` | Optional reference-to-video endpoint |
 | `FAL_VIDEO_EDIT_MODEL` | `str \| None` | `None` | Optional video-to-video endpoint (future use) |
 | `FAL_VIDEO_RESOLUTION` | `str` | `720p` | Seedance resolution preset when a model is Seedance |
-| `FAL_VIDEO_REFERENCE_IMAGE_MAX_BYTES` | `int` | `6_000_000` | Max base64 reference image bytes to send |
+| `FAL_VIDEO_REFERENCE_IMAGE_MAX_BYTES` | `int` | `6_000_000` | Max Telegram reference image bytes to upload through the SDK |
 | `FAL_VIDEO_COST_PER_SECOND_USD` | `float` | `0.0` | Optional log-only cost estimate |
-| `FAL_VIDEO_SUBMIT_TIMEOUT_SECONDS` | `int` | `45` | HTTP timeout for submit/status calls |
+| `FAL_CLIENT_TIMEOUT_SECONDS` | `int` | `45` | Fal SDK client timeout plus final asset download timeout |
 
 `VIDEO_PROVIDER_ORDER` now accepts `fal` in addition to `vertex` and `runpod`.
 

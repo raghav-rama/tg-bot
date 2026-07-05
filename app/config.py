@@ -128,6 +128,10 @@ class Settings(BaseSettings):
         default="image/jpeg",
         alias="VERTEX_IMAGE_OUTPUT_MIME_TYPE",
     )
+    vertex_image_timeout_seconds: int = Field(
+        default=120,
+        alias="VERTEX_IMAGE_TIMEOUT_SECONDS",
+    )
     vertex_image_cost_per_image_usd: float = Field(
         default=0.0,
         alias="VERTEX_IMAGE_COST_PER_IMAGE_USD",
@@ -199,11 +203,7 @@ class Settings(BaseSettings):
         default=0.0,
         alias="RUNPOD_VIDEO_COST_PER_SECOND_USD",
     )
-    fal_api_key: SecretStr | None = Field(default=None, alias="FAL_API_KEY")
-    fal_video_base_url: str = Field(
-        default="https://queue.fal.run",
-        alias="FAL_VIDEO_BASE_URL",
-    )
+    fal_key: SecretStr | None = Field(default=None, alias="FAL_KEY")
     fal_video_model: str = Field(
         default="fal-ai/kling-video/v3/standard/text-to-video",
         alias="FAL_VIDEO_MODEL",
@@ -236,9 +236,9 @@ class Settings(BaseSettings):
         default=0.0,
         alias="FAL_VIDEO_COST_PER_SECOND_USD",
     )
-    fal_video_submit_timeout_seconds: int = Field(
+    fal_client_timeout_seconds: int = Field(
         default=45,
-        alias="FAL_VIDEO_SUBMIT_TIMEOUT_SECONDS",
+        alias="FAL_CLIENT_TIMEOUT_SECONDS",
     )
     bot_video_max_bytes: int = Field(
         default=50 * 1024 * 1024,
@@ -308,7 +308,6 @@ class Settings(BaseSettings):
         "runpod_video_endpoint_id",
         "runpod_video_base_url",
         "runpod_video_model",
-        "fal_video_base_url",
         "fal_video_model",
         "fal_video_image_to_video_model",
         "fal_video_reference_to_video_model",
@@ -323,7 +322,7 @@ class Settings(BaseSettings):
         normalized = value.strip()
         return normalized or None
 
-    @field_validator("telegram_webhook_secret_token", "runpod_api_key", "fal_api_key", mode="before")
+    @field_validator("telegram_webhook_secret_token", "runpod_api_key", "fal_key", mode="before")
     @classmethod
     def normalize_optional_secret(
         cls,
@@ -393,6 +392,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "vertex_video_duration_seconds",
+        "vertex_image_timeout_seconds",
         "bot_video_max_bytes",
         "telegram_video_request_timeout_seconds",
         "video_job_poll_interval_seconds",
@@ -412,7 +412,7 @@ class Settings(BaseSettings):
             raise ValueError("video settings must be greater than zero")
         return value
 
-    @field_validator("fal_video_reference_image_max_bytes", "fal_video_submit_timeout_seconds")
+    @field_validator("fal_video_reference_image_max_bytes", "fal_client_timeout_seconds")
     @classmethod
     def validate_fal_positive_ints(cls, value: int) -> int:
         if value <= 0:
@@ -496,9 +496,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_fal_video_settings(self) -> Settings:
-        if "fal" in self.video_provider_order and self.fal_api_key is None:
+        if "fal" in self.video_provider_order and self.fal_key is None:
             raise ValueError(
-                "FAL_API_KEY is required when VIDEO_PROVIDER_ORDER includes 'fal'"
+                "FAL_KEY is required when VIDEO_PROVIDER_ORDER includes 'fal'"
             )
         return self
 
@@ -520,7 +520,7 @@ class Settings(BaseSettings):
 
     @property
     def fal_video_generation_enabled(self) -> bool:
-        return self.fal_api_key is not None
+        return self.fal_key is not None
 
     @property
     def fal_video_available_families(self) -> set[str]:

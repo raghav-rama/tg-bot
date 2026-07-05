@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import time
 
 import pytest
 
@@ -37,6 +38,17 @@ class _FakeModels:
 class _FakeClient:
     def __init__(self, models: _FakeModels) -> None:
         self.models = models
+
+
+class _SlowModels(_FakeModels):
+    def __init__(self, *, sleep_seconds: float, response=None) -> None:
+        super().__init__(response=response, error=None)
+        self.sleep_seconds = sleep_seconds
+
+    def generate_content(self, **kwargs):
+        self.generate_content_calls.append(kwargs)
+        time.sleep(self.sleep_seconds)
+        return self.response if self.response is not None else type("Response", (), {"candidates": []})()
 
 
 class _FakeAPIError(Exception):
@@ -83,9 +95,24 @@ def make_reference_image() -> ImageInput:
     )
 
 
-def test_vertex_image_client_kwargs_prefer_adc_when_project_is_set() -> None:
+def test_vertex_image_client_kwargs_prefer_api_key_when_present() -> None:
     kwargs = VertexImageProvider._build_client_kwargs(
         api_key="vertex-key",
+        project="test-project",
+        location="us-central1",
+    )
+
+    assert kwargs == {
+        "vertexai": True,
+        "api_key": "vertex-key",
+    }
+
+
+
+
+def test_vertex_image_client_kwargs_use_adc_without_api_key() -> None:
+    kwargs = VertexImageProvider._build_client_kwargs(
+        api_key=None,
         project="test-project",
         location="us-central1",
     )
@@ -95,7 +122,6 @@ def test_vertex_image_client_kwargs_prefer_adc_when_project_is_set() -> None:
         "project": "test-project",
         "location": "us-central1",
     }
-
 
 def test_vertex_image_client_kwargs_use_api_key_without_project() -> None:
     kwargs = VertexImageProvider._build_client_kwargs(
@@ -320,6 +346,94 @@ async def test_generate_image_rejects_reference_image_for_imagen_without_vertex_
 
     assert models.generate_images_calls == []
     assert models.generate_content_calls == []
+
+
+@pytest.mark.asyncio
+async def test_generate_image_times_out_when_generation_hangs() -> None:
+    provider = VertexImageProvider(
+        project="test-project",
+        location="us-central1",
+        default_model="imagen-4.0-fast-generate-001",
+        default_aspect_ratio="1:1",
+        default_output_mime_type="image/jpeg",
+        client=_FakeClient(_SlowModels(sleep_seconds=0.05)),
+        timeout_seconds=0.01,
+    )
+
+    with pytest.raises(ProviderTimeoutError):
+        await provider.generate_image(
+            ImageGenerationRequest(
+                chat_id=1,
+                user_id=42,
+                prompt="A fox in a library",
+                model="gemini-3-pro-image-preview",
+                aspect_ratio="1:1",
+                output_mime_type="image/jpeg",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_generate_image_succeeds_with_longer_timeout() -> None:
+    response = type(
+        "Response",
+        (),
+        {
+            "candidates": [
+                type(
+                    "Candidate",
+                    (),
+                    {
+                        "content": type(
+                            "Content",
+                            (),
+                            {
+                                "parts": [
+                                    type(
+                                        "Part",
+                                        (),
+                                        {
+                                            "inline_data": type(
+                                                "InlineData",
+                                                (),
+                                                {
+                                                    "data": b"slow-gemini-image",
+                                                    "mime_type": "image/png",
+                                                },
+                                            )()
+                                        },
+                                    )(),
+                                ]
+                            },
+                        )()
+                    },
+                )()
+            ]
+        },
+    )()
+    provider = VertexImageProvider(
+        project="test-project",
+        location="us-central1",
+        default_model="imagen-4.0-fast-generate-001",
+        default_aspect_ratio="1:1",
+        default_output_mime_type="image/jpeg",
+        client=_FakeClient(_SlowModels(sleep_seconds=0.01, response=response)),
+        timeout_seconds=0.1,
+    )
+
+    result = await provider.generate_image(
+        ImageGenerationRequest(
+            chat_id=1,
+            user_id=42,
+            prompt="A fox in a library",
+            model="gemini-3-pro-image-preview",
+            aspect_ratio="1:1",
+            output_mime_type="image/jpeg",
+        )
+    )
+
+    assert result.image_bytes == b"slow-gemini-image"
+    assert result.mime_type == "image/png"
 
 
 @pytest.mark.asyncio

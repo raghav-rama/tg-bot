@@ -97,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     default_model=loaded_settings.vertex_image_model,
                     default_aspect_ratio=loaded_settings.vertex_image_aspect_ratio,
                     default_output_mime_type=loaded_settings.vertex_image_output_mime_type,
+                    timeout_seconds=loaded_settings.vertex_image_timeout_seconds,
                 )
                 container.image_generator = image_generator
             video_generator = None
@@ -144,8 +145,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             if loaded_settings.fal_video_generation_enabled:
                 video_providers["fal"] = FalVideoProvider(
-                    api_key=loaded_settings.fal_api_key.get_secret_value(),
-                    base_url=loaded_settings.fal_video_base_url,
+                    api_key=loaded_settings.fal_key.get_secret_value(),
                     default_model=(
                         loaded_settings.fal_video_text_to_video_model
                         or loaded_settings.fal_video_model
@@ -154,7 +154,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     reference_to_video_model=loaded_settings.fal_video_reference_to_video_model,
                     edit_model=loaded_settings.fal_video_edit_model,
                     reference_image_max_bytes=loaded_settings.fal_video_reference_image_max_bytes,
-                    submit_timeout_seconds=loaded_settings.fal_video_submit_timeout_seconds,
+                    client_timeout_seconds=loaded_settings.fal_client_timeout_seconds,
                 )
             if video_providers:
                 video_generator = VideoProviderRouter(

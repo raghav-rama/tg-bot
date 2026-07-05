@@ -83,9 +83,24 @@ def make_reference_image() -> ImageInput:
     )
 
 
-def test_vertex_video_client_kwargs_prefer_adc_when_project_is_set() -> None:
+def test_vertex_video_client_kwargs_prefer_api_key_when_present() -> None:
     kwargs = VertexVideoProvider._build_client_kwargs(
         api_key="vertex-key",
+        project="test-project",
+        location="us-central1",
+    )
+
+    assert kwargs == {
+        "vertexai": True,
+        "api_key": "vertex-key",
+    }
+
+
+
+
+def test_vertex_video_client_kwargs_use_adc_without_api_key() -> None:
+    kwargs = VertexVideoProvider._build_client_kwargs(
+        api_key=None,
         project="test-project",
         location="us-central1",
     )
@@ -95,7 +110,6 @@ def test_vertex_video_client_kwargs_prefer_adc_when_project_is_set() -> None:
         "project": "test-project",
         "location": "us-central1",
     }
-
 
 def test_vertex_video_client_kwargs_use_api_key_without_project() -> None:
     kwargs = VertexVideoProvider._build_client_kwargs(

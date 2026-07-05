@@ -61,9 +61,9 @@ As of `2026-07-05`, this repository contains the completed Phase 1 foundation, t
 - An in-process polling worker now checks pending video jobs and delivers completed assets through Telegram `sendVideo`.
 - Video job persistence stores operation state, output URIs, failure reasons, and Telegram delivery metadata without persisting raw video bytes in SQLite.
 - Tests exist under `tests/` for health and readiness behavior, normalization, reply-to-photo reference commands, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, supersession, Telegram formatting, image generation, video job submission, worker completion, worker failure handling, Vertex video, Runpod video, Fal video, provider routing, and settings provider exposure.
-- Phase 6 now has a `FalVideoProvider` adapter behind the existing `VideoGenerator` interface, using the Fal queue REST API (`https://queue.fal.run/{model_id}`) with submit, status, and result polling.
+- Phase 6 now has a `FalVideoProvider` adapter behind the existing `VideoGenerator` interface, using the official `fal-client` SDK for queued submit, request-handle recreation, status polling, and result retrieval.
 - Phase 6 supports Fal-hosted Kling, Seedance 2.0, and Gemini Omni Flash endpoints for text-to-video, image-to-video, and reference-to-video modes by inferring the model family and mode from the configured endpoint path.
-- Reference images are sent to Fal as base64 data URIs using the correct parameter name per model family (`start_image_url` for Kling, `image_url` for Seedance/Gemini, `image_urls` for reference-to-video).
+- Reference images are uploaded to Fal through the SDK and then sent using the correct parameter name per model family (`start_image_url` for Kling, `image_url` for Seedance/Gemini, `image_urls` for reference-to-video).
 - `/settings` exposes `"fal"` as a video provider option and, when more than one Fal family is configured, a **Fal model** sub-menu lets users pick Kling, Seedance, or Gemini per chat.
 - Real Vertex, Runpod, Fal, and Telegram verification still depends on configured credentials and a manual runtime check.
 - Inline generated video bytes remain transient in memory only, while URI-backed assets are expected to live in a bucket with lifecycle cleanup managed outside the app.

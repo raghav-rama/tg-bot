@@ -190,7 +190,7 @@ def test_video_menu_shows_fal_model_button_when_multiple_families() -> None:
         TELEGRAM_BOT_TOKEN="test-token",
         OPENAI_API_KEY="test-key",
         TELEGRAM_ALLOWED_USER_IDS="42",
-        FAL_API_KEY="test-fal-key",
+        FAL_KEY="test-fal-key",
         FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/kling-video/v3/standard/text-to-video",
         FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL="bytedance/seedance-2.0/reference-to-video",
     )
@@ -210,7 +210,7 @@ def test_video_menu_hides_fal_model_button_for_single_family() -> None:
         TELEGRAM_BOT_TOKEN="test-token",
         OPENAI_API_KEY="test-key",
         TELEGRAM_ALLOWED_USER_IDS="42",
-        FAL_API_KEY="test-fal-key",
+        FAL_KEY="test-fal-key",
         FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/kling-video/v3/standard/text-to-video",
     )
 
@@ -226,7 +226,7 @@ def test_fal_video_model_presets_match_configured_families() -> None:
         TELEGRAM_BOT_TOKEN="test-token",
         OPENAI_API_KEY="test-key",
         TELEGRAM_ALLOWED_USER_IDS="42",
-        FAL_API_KEY="test-fal-key",
+        FAL_KEY="test-fal-key",
         FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/google/gemini-omni-flash",
         FAL_VIDEO_IMAGE_TO_VIDEO_MODEL="fal-ai/kling-video/v3/standard/image-to-video",
     )
@@ -244,7 +244,7 @@ def test_active_settings_summary_includes_fal_model() -> None:
         TELEGRAM_BOT_TOKEN="test-token",
         OPENAI_API_KEY="test-key",
         TELEGRAM_ALLOWED_USER_IDS="42",
-        FAL_API_KEY="test-fal-key",
+        FAL_KEY="test-fal-key",
         FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/google/gemini-omni-flash",
     )
     summary = active_settings_summary(

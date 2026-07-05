@@ -59,6 +59,7 @@ As of `2026-07-05`, the repository is no longer docs-only. Phase 1, Phase 1.5, P
 - Live Vertex, Runpod, and Telegram verification for the `/image`, `/video`, and `/video_ltx` flows still depends on real environment variables and a manual runtime check.
 - Per-user/per-chat quotas, video/image daily budget caps, prompt/reference-image moderation gates, and in-app provider-output URL retention/expiry handling were deferred out of completed Phase 4 and remain future work unless the roadmap changes.
 - Fal-hosted video provider support is accepted as complete and merged into `dev`, including Kling, Seedance, and Gemini Omni Flash model families behind the existing queued `/video` path with per-family selection available in `/settings`.
+- The Fal video provider now uses the official Python `fal-client` SDK for queued submit/poll/result handling and uploads Telegram reference images to Fal before image-to-video or reference-to-video requests.
 
 ## Telegram Documentation
 

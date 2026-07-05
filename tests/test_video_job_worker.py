@@ -403,7 +403,7 @@ async def test_worker_completes_fal_job_and_delivers_video(service_bundle) -> No
     video_generator = service_bundle["video_generator"]
     preferences = service_bundle["preferences"]
 
-    settings.fal_api_key = "fake-fal-key"
+    settings.fal_key = "fake-fal-key"
     settings.fal_video_model = "fal-ai/kling-video/v3/standard/text-to-video"
     settings.video_provider_order = ("fal",)
     await preferences.set_preference(
@@ -460,7 +460,7 @@ async def test_worker_marks_fal_job_failed_on_poll_failure(service_bundle) -> No
     video_generator = service_bundle["video_generator"]
     preferences = service_bundle["preferences"]
 
-    settings.fal_api_key = "fake-fal-key"
+    settings.fal_key = "fake-fal-key"
     settings.fal_video_model = "fal-ai/kling-video/v3/standard/text-to-video"
     settings.video_provider_order = ("fal",)
     await preferences.set_preference(

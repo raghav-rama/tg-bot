@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import inspect
 import logging
 from typing import Any, Literal
 
@@ -8,6 +11,7 @@ import httpx
 from app.domain.errors import ProviderTimeoutError, ProviderUpstreamError
 from app.domain.models import (
     GeneratedVideoResult,
+    ImageInput,
     SubmittedVideoJob,
     VideoGenerationPollRequest,
     VideoGenerationRequest,
@@ -15,7 +19,8 @@ from app.domain.models import (
 )
 from app.logging import log_kv
 
-FalMode = Literal["text-to-video", "image-to-video", "reference-to-video", "edit"]
+FalMode = Literal["text-to-video",
+                  "image-to-video", "reference-to-video", "edit"]
 FalFamily = Literal["kling", "seedance", "gemini", "other"]
 
 
@@ -24,41 +29,50 @@ class FalVideoProvider:
         self,
         *,
         api_key: str,
-        base_url: str = "https://queue.fal.run",
         default_model: str,
         image_to_video_model: str | None,
         reference_image_max_bytes: int,
         reference_to_video_model: str | None = None,
         edit_model: str | None = None,
-        submit_timeout: httpx.Timeout | None = None,
-        submit_timeout_seconds: int | None = None,
-        client: httpx.AsyncClient | None = None,
+        client_timeout_seconds: int | None = None,
+        client: Any | None = None,
+        download_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.logger = logging.getLogger("app.providers.fal_video_provider")
         self.api_key = api_key
-        self.base_url = base_url.rstrip("/")
         self.default_model = default_model
         self.image_to_video_model = image_to_video_model
         self.reference_to_video_model = reference_to_video_model
         self.edit_model = edit_model
         self.reference_image_max_bytes = reference_image_max_bytes
-        self._request_urls: dict[str, dict[str, str]] = {}
+
         if client is not None:
             self._client = client
         else:
-            timeout = submit_timeout or httpx.Timeout(submit_timeout_seconds or 45)
-            self._client = httpx.AsyncClient(timeout=timeout)
+            try:
+                import fal_client
+            except ImportError as exc:
+                raise RuntimeError(
+                    "fal-client must be installed to enable Fal video generation"
+                ) from exc
+            self._client = fal_client.AsyncClient(
+                key=api_key,
+                default_timeout=float(client_timeout_seconds or 45),
+            )
+
+        timeout = httpx.Timeout(client_timeout_seconds or 45)
+        self._download_client = download_client or httpx.AsyncClient(
+            timeout=timeout)
 
     async def close(self) -> None:
-        await self._client.aclose()
+        await _maybe_close(self._download_client)
+        await _maybe_close(self._client)
 
     async def submit_video(
         self,
         request: VideoGenerationRequest,
     ) -> SubmittedVideoJob:
         model = self._select_model_for(request)
-        body = self._build_submit_body(request, model)
-        url = f"{self.base_url}/{model}"
         self.logger.info(
             log_kv(
                 "fal_video_submit_started",
@@ -69,20 +83,47 @@ class FalVideoProvider:
                 reference_image=bool(request.reference_image),
             )
         )
-        response = await self._request("POST", url, json=body)
-        response_body = self._json_body(response)
-        request_id = response_body.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            raise ProviderUpstreamError(
-                "Fal video generation returned no request_id"
+
+        try:
+            arguments = await self._build_submit_arguments(request, model)
+            handle = await self._client.submit(model, arguments=arguments)
+        except httpx.TimeoutException as exc:
+            raise ProviderTimeoutError(
+                "Fal video generation timed out") from exc
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {408, 504}:
+                raise ProviderTimeoutError(
+                    "Fal video generation timed out") from exc
+            body = _response_text(exc.response)
+            self.logger.warning(
+                log_kv(
+                    "fal_video_http_error",
+                    operation="submit",
+                    model=model,
+                    status_code=exc.response.status_code,
+                    response_body=body,
+                )
             )
-        status_url = response_body.get("status_url")
-        response_url = response_body.get("response_url")
-        if isinstance(status_url, str) and status_url:
-            self._request_urls[request_id] = {
-                "status_url": status_url,
-                "response_url": response_url if isinstance(response_url, str) else "",
-            }
+            raise ProviderUpstreamError(
+                f"Fal video generation failed (HTTP {exc.response.status_code}): {
+                    body}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            self.logger.warning(
+                log_kv(
+                    "fal_video_http_error",
+                    operation="submit",
+                    model=model,
+                    error=str(exc),
+                )
+            )
+            raise ProviderUpstreamError("Fal video generation failed") from exc
+
+        request_id = str(getattr(handle, "request_id", "") or "")
+        if not request_id:
+            raise ProviderUpstreamError(
+                "Fal video generation returned no request_id")
+
         self.logger.info(
             log_kv(
                 "fal_video_submit_succeeded",
@@ -96,6 +137,167 @@ class FalVideoProvider:
             operation_name=request_id,
             provider="fal",
             raw_model=model,
+        )
+
+    async def poll_video(
+        self,
+        request: VideoGenerationPollRequest,
+    ) -> VideoJobPollResult:
+        model = request.model
+        self.logger.debug(
+            log_kv(
+                "fal_video_poll_started",
+                operation_name=request.operation_name,
+                model=model,
+            )
+        )
+
+        try:
+            handle = self._client.get_handle(model, request.operation_name)
+            status = await handle.status(with_logs=False)
+        except httpx.TimeoutException as exc:
+            raise ProviderTimeoutError("Fal video polling timed out") from exc
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {408, 504}:
+                raise ProviderTimeoutError(
+                    "Fal video polling timed out") from exc
+            body = _response_text(exc.response)
+            self.logger.warning(
+                log_kv(
+                    "fal_video_http_error",
+                    operation="status",
+                    model=model,
+                    operation_name=request.operation_name,
+                    status_code=exc.response.status_code,
+                    response_body=body,
+                )
+            )
+            raise ProviderUpstreamError(
+                f"Fal video polling failed (HTTP {exc.response.status_code}): {
+                    body}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            self.logger.warning(
+                log_kv(
+                    "fal_video_http_error",
+                    operation="status",
+                    model=model,
+                    operation_name=request.operation_name,
+                    error=str(exc),
+                )
+            )
+            raise ProviderUpstreamError("Fal video polling failed") from exc
+
+        status_name = _queue_status_name(status)
+        if status_name in {"queued", "in_progress"}:
+            return VideoJobPollResult(
+                status="running",
+                operation_name=request.operation_name,
+            )
+        if status_name != "completed":
+            return VideoJobPollResult(
+                status="failed",
+                operation_name=request.operation_name,
+                failure_reason=(
+                    "Fal video generation returned unknown status: "
+                    f"{_queue_status_label(status)}"
+                ),
+            )
+
+        try:
+            result_body = await handle.get()
+        except httpx.TimeoutException as exc:
+            raise ProviderTimeoutError("Fal video polling timed out") from exc
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {408, 504}:
+                raise ProviderTimeoutError(
+                    "Fal video polling timed out") from exc
+            body = _response_text(exc.response)
+            self.logger.warning(
+                log_kv(
+                    "fal_video_http_error",
+                    operation="result",
+                    model=model,
+                    operation_name=request.operation_name,
+                    status_code=exc.response.status_code,
+                    response_body=body,
+                )
+            )
+            raise ProviderUpstreamError(
+                f"Fal video polling failed (HTTP {exc.response.status_code}): {
+                    body}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            self.logger.warning(
+                log_kv(
+                    "fal_video_http_error",
+                    operation="result",
+                    model=model,
+                    operation_name=request.operation_name,
+                    error=str(exc),
+                )
+            )
+            raise ProviderUpstreamError("Fal video polling failed") from exc
+
+        if not isinstance(result_body, dict):
+            raise ProviderUpstreamError(
+                "Fal video generation returned invalid JSON")
+
+        error = _first_string(result_body, "error", "error_type")
+        if error is not None:
+            return VideoJobPollResult(
+                status="failed",
+                operation_name=request.operation_name,
+                failure_reason=error,
+            )
+
+        video = result_body.get("video")
+        if not isinstance(video, dict):
+            return VideoJobPollResult(
+                status="failed",
+                operation_name=request.operation_name,
+                failure_reason="Fal video generation returned no video metadata",
+            )
+
+        video_url = video.get("url")
+        if not isinstance(video_url, str) or not video_url:
+            return VideoJobPollResult(
+                status="failed",
+                operation_name=request.operation_name,
+                failure_reason="Fal video generation returned no video URL",
+            )
+
+        video_bytes, mime_type, file_size = await self._download_video(
+            video_url,
+            mime_type=(
+                video.get("content_type")
+                if isinstance(video.get("content_type"), str)
+                else None
+            ),
+            file_size=_optional_int(video.get("file_size")),
+        )
+        if not video_bytes:
+            return VideoJobPollResult(
+                status="failed",
+                operation_name=request.operation_name,
+                failure_reason="Fal video generation returned an empty video asset",
+            )
+
+        return VideoJobPollResult(
+            status="completed",
+            operation_name=request.operation_name,
+            generated_video=GeneratedVideoResult(
+                video_bytes=video_bytes,
+                mime_type=mime_type,
+                provider="fal",
+                raw_model=model,
+                prompt=request.prompt,
+                output_uri=None,
+                duration_seconds=None,
+                width=None,
+                height=None,
+                file_size=file_size,
+            ),
         )
 
     def _select_model_for(self, request: VideoGenerationRequest) -> str:
@@ -126,247 +328,118 @@ class FalVideoProvider:
             selected = self.default_model
         return selected
 
-    def _build_submit_body(
+    async def _build_submit_arguments(
         self,
         request: VideoGenerationRequest,
         model: str,
     ) -> dict[str, Any]:
         family = _family_for_model(model)
         mode = _mode_for_model(model)
-        body: dict[str, Any] = {"prompt": request.prompt}
+        arguments: dict[str, Any] = {"prompt": request.prompt}
 
         if request.duration_seconds is not None:
-            body["duration"] = _duration_value(family, request.duration_seconds)
+            arguments["duration"] = _duration_value(
+                family, request.duration_seconds)
 
-        body.update(_aspect_or_resolution_payload(family, mode, request))
+        arguments.update(_aspect_or_resolution_payload(family, mode, request))
 
         reference_image = request.reference_image
         image_url_field = _image_url_field(family, mode)
-        if mode in {"image-to-video", "reference-to-video"}:
-            if reference_image is None:
-                raise ProviderUpstreamError(
-                    f"Fal {mode} model requires a reference image"
-                )
-
-        if reference_image is not None:
-            data_uri = (
-                f"data:{reference_image.mime_type};base64,"
-                f"{reference_image.bytes_b64}"
+        if mode in {"image-to-video", "reference-to-video"} and reference_image is None:
+            raise ProviderUpstreamError(
+                f"Fal {mode} model requires a reference image"
             )
-            if reference_image.byte_size > self.reference_image_max_bytes:
-                self.logger.info(
-                    log_kv(
-                        "fal_video_reference_image_omitted",
-                        chat_id=request.chat_id,
-                        user_id=request.user_id,
-                        byte_size=reference_image.byte_size,
-                        max_bytes=self.reference_image_max_bytes,
-                    )
-                )
-            elif image_url_field == "image_urls":
-                body["image_urls"] = [data_uri]
-            elif image_url_field is not None:
-                body[image_url_field] = data_uri
-            else:
-                # Fal mode is text-to-video; image is ignored because no i2v/r2v
-                # model was selected. Log transparently.
-                self.logger.info(
-                    log_kv(
-                        "fal_video_reference_image_ignored",
-                        chat_id=request.chat_id,
-                        user_id=request.user_id,
-                        reason="selected_text_to_video_model",
-                    )
-                )
 
-        return body
+        if reference_image is None:
+            return arguments
 
-    async def poll_video(
-        self,
-        request: VideoGenerationPollRequest,
-    ) -> VideoJobPollResult:
-        model = request.model
-        urls = self._request_urls.get(request.operation_name)
-        if urls is None or not urls.get("status_url"):
-            self.logger.warning(
+        if reference_image.byte_size > self.reference_image_max_bytes:
+            self.logger.info(
                 log_kv(
-                    "fal_video_poll_urls_missing",
-                    operation_name=request.operation_name,
-                    model=model,
+                    "fal_video_reference_image_omitted",
+                    chat_id=request.chat_id,
+                    user_id=request.user_id,
+                    byte_size=reference_image.byte_size,
+                    max_bytes=self.reference_image_max_bytes,
                 )
             )
-        status_url = (urls or {}).get("status_url") or (
-            f"{self.base_url}/{model}/requests/{request.operation_name}/status"
-        )
-        response_url = (urls or {}).get("response_url") or (
-            f"{self.base_url}/{model}/requests/{request.operation_name}/response"
-        )
+            return arguments
 
-        self.logger.debug(
-            log_kv(
-                "fal_video_poll_started",
-                operation_name=request.operation_name,
-                model=model,
-                status_url=status_url,
-                response_url=response_url,
+        if image_url_field is None:
+            self.logger.info(
+                log_kv(
+                    "fal_video_reference_image_ignored",
+                    chat_id=request.chat_id,
+                    user_id=request.user_id,
+                    reason="selected_text_to_video_model",
+                )
             )
-        )
+            return arguments
 
-        status_response = await self._request("GET", status_url)
-        status_body = self._json_body(status_response)
+        data_uri = _reference_image_data_uri(reference_image)
+        if image_url_field == "image_urls":
+            arguments["image_urls"] = [data_uri]
+        else:
+            arguments[image_url_field] = data_uri
+        return arguments
 
-        error = self._first_string(status_body, "error", "error_type")
-        if error is not None:
-            return VideoJobPollResult(
-                status="failed",
-                operation_name=request.operation_name,
-                failure_reason=error,
-            )
-
-        status = str(status_body.get("status") or "").upper()
-        if status in {"IN_QUEUE", "IN_PROGRESS"}:
-            return VideoJobPollResult(
-                status="running",
-                operation_name=request.operation_name,
-            )
-
-        if status != "COMPLETED":
-            return VideoJobPollResult(
-                status="failed",
-                operation_name=request.operation_name,
-                failure_reason=f"Fal video generation returned unknown status: {status}",
-            )
-
-        result_response = await self._request("GET", response_url)
-        result_body = self._json_body(result_response)
-
-        video = result_body.get("video")
-        if not isinstance(video, dict):
-            return VideoJobPollResult(
-                status="failed",
-                operation_name=request.operation_name,
-                failure_reason="Fal video generation returned no video metadata",
-            )
-
-        video_url = video.get("url")
-        if not isinstance(video_url, str) or not video_url:
-            return VideoJobPollResult(
-                status="failed",
-                operation_name=request.operation_name,
-                failure_reason="Fal video generation returned no video URL",
-            )
-
-        video_response = await self._request("GET", video_url, auth=False)
-        video_bytes = video_response.content
-        if not video_bytes:
-            return VideoJobPollResult(
-                status="failed",
-                operation_name=request.operation_name,
-                failure_reason="Fal video generation returned an empty video asset",
-            )
-
-        mime_type = video.get("content_type") or video_response.headers.get(
-            "content-type"
-        ) or "video/mp4"
-        file_size = self._optional_int(video.get("file_size")) or len(video_bytes)
-
-        return VideoJobPollResult(
-            status="completed",
-            operation_name=request.operation_name,
-            generated_video=GeneratedVideoResult(
-                video_bytes=video_bytes,
-                mime_type=str(mime_type),
-                provider="fal",
-                raw_model=model,
-                prompt=request.prompt,
-                output_uri=None,
-                duration_seconds=None,
-                width=None,
-                height=None,
-                file_size=file_size,
-            ),
-        )
-
-    async def _request(
+    async def _download_video(
         self,
-        method: str,
-        url: str,
+        video_url: str,
         *,
-        json: dict[str, Any] | None = None,
-        auth: bool = True,
-    ) -> httpx.Response:
-        headers: dict[str, str] = {}
-        if auth:
-            headers["Authorization"] = f"Key {self.api_key}"
-        if json is not None:
-            headers["Content-Type"] = "application/json"
+        mime_type: str | None,
+        file_size: int | None,
+    ) -> tuple[bytes, str, int]:
         try:
-            response = await self._client.request(
-                method,
-                url,
-                json=json,
-                headers=headers or None,
-            )
+            response = await self._download_client.get(video_url)
             response.raise_for_status()
-            return response
         except httpx.TimeoutException as exc:
-            raise ProviderTimeoutError("Fal video generation timed out") from exc
+            raise ProviderTimeoutError("Fal video polling timed out") from exc
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code in {408, 504}:
-                raise ProviderTimeoutError("Fal video generation timed out") from exc
-            try:
-                body = exc.response.text[:500]
-            except Exception:
-                body = "<unable to read body>"
+                raise ProviderTimeoutError(
+                    "Fal video polling timed out") from exc
+            body = _response_text(exc.response)
             self.logger.warning(
                 log_kv(
                     "fal_video_http_error",
-                    method=method,
-                    url=url,
+                    operation="download",
+                    url=video_url,
                     status_code=exc.response.status_code,
                     response_body=body,
                 )
             )
             raise ProviderUpstreamError(
-                f"Fal video generation failed (HTTP {exc.response.status_code}): {body}"
+                f"Fal video polling failed (HTTP {exc.response.status_code}): {
+                    body}"
             ) from exc
         except httpx.HTTPError as exc:
             self.logger.warning(
                 log_kv(
                     "fal_video_http_error",
-                    method=method,
-                    url=url,
+                    operation="download",
+                    url=video_url,
                     error=str(exc),
                 )
             )
-            raise ProviderUpstreamError("Fal video generation failed") from exc
+            raise ProviderUpstreamError("Fal video polling failed") from exc
 
-    @staticmethod
-    def _json_body(response: httpx.Response) -> dict[str, Any]:
-        try:
-            body = response.json()
-        except ValueError as exc:
-            raise ProviderUpstreamError("Fal video generation returned invalid JSON") from exc
-        if not isinstance(body, dict):
-            raise ProviderUpstreamError("Fal video generation returned invalid JSON")
-        return body
+        video_bytes = response.content
+        resolved_mime_type = mime_type or response.headers.get(
+            "content-type") or "video/mp4"
+        resolved_file_size = file_size or len(video_bytes)
+        return video_bytes, str(resolved_mime_type), resolved_file_size
 
-    @staticmethod
-    def _first_string(source: dict[str, Any], *keys: str) -> str | None:
-        for key in keys:
-            value = source.get(key)
-            if isinstance(value, str) and value:
-                return value
-        return None
 
-    @staticmethod
-    def _optional_int(value: object) -> int | None:
-        if value is None:
-            return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
+def _reference_image_data_uri(image: ImageInput) -> str:
+    try:
+        image_bytes = base64.b64decode(image.bytes_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ProviderUpstreamError(
+            "Reference image payload is invalid") from exc
+    if not image_bytes:
+        raise ProviderUpstreamError("Reference image payload is empty")
+    return f"data:{image.mime_type};base64,{image.bytes_b64}"
 
 
 def _family_for_model(model: str) -> FalFamily:
@@ -390,7 +463,6 @@ def _mode_for_model(model: str) -> FalMode:
         return "reference-to-video"
     if lower.endswith("/edit") or lower.endswith("/edit/"):
         return "edit"
-    # Default for bare endpoints such as google/gemini-omni-flash
     return "text-to-video"
 
 
@@ -422,10 +494,70 @@ def _aspect_or_resolution_payload(
         if mode in {"text-to-video", "reference-to-video"} and request.aspect_ratio:
             return {"aspect_ratio": request.aspect_ratio}
     if family == "gemini":
-        # Gemini only supports a 16:9 or 9:16 aspect ratio; coerce unsupported values
-        # silently rather than letting the provider reject the request.
         aspect_ratio = request.aspect_ratio
         if aspect_ratio not in {"16:9", "9:16"}:
             aspect_ratio = "9:16"
         return {"aspect_ratio": aspect_ratio}
     return {}
+
+
+async def _maybe_close(resource: object) -> None:
+    close = getattr(resource, "aclose", None)
+    if callable(close):
+        result = close()
+        if inspect.isawaitable(result):
+            await result
+        return
+    close = getattr(resource, "close", None)
+    if callable(close):
+        result = close()
+        if inspect.isawaitable(result):
+            await result
+
+
+def _response_text(response: httpx.Response) -> str:
+    try:
+        return response.text[:500]
+    except Exception:
+        return "<unable to read body>"
+
+
+def _queue_status_name(status: object) -> str:
+    class_name = type(status).__name__.lower()
+    if class_name.endswith("queued"):
+        return "queued"
+    if class_name.endswith("inprogress"):
+        return "in_progress"
+    if class_name.endswith("completed"):
+        return "completed"
+
+    raw_status = str(getattr(status, "status", "") or "").strip().upper()
+    if raw_status == "IN_QUEUE":
+        return "queued"
+    if raw_status == "IN_PROGRESS":
+        return "in_progress"
+    if raw_status == "COMPLETED":
+        return "completed"
+    return raw_status.lower()
+
+
+def _queue_status_label(status: object) -> str:
+    raw_status = str(getattr(status, "status", "") or "").strip().upper()
+    return raw_status or type(status).__name__ or "unknown"
+
+
+def _first_string(source: dict[str, object], *keys: str) -> str | None:
+    for key in keys:
+        value = source.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
