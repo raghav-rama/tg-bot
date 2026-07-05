@@ -18,7 +18,7 @@ This document separates the current repo state from the planned delivery phases.
   - `Phase 5 - ElevenLabs Hindi Text To Speech`
   - `Phase 6 - Fal Video Provider Support`
 - Status: `in_progress`
-- Last updated: `2026-06-18`
+- Updated: `2026-07-05`
 - Previous phase accepted: `Phase 4 - Hardening And Expansion`
 - Parallel implementation worktrees:
   - Phase 5 branch: `phase-5-elevenlabs-tts`
@@ -61,8 +61,12 @@ As of `2026-06-18`, this repository contains the completed Phase 1 foundation, t
 - Runpod GCS-backed outputs are downloaded through transient bot-side signed URLs while storing only durable `gs://` output URIs.
 - An in-process polling worker now checks pending video jobs and delivers completed assets through Telegram `sendVideo`.
 - Video job persistence stores operation state, output URIs, failure reasons, and Telegram delivery metadata without persisting raw video bytes in SQLite.
-- Tests exist under `tests/` for health and readiness behavior, normalization, reply-to-photo reference commands, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, supersession, Telegram formatting, image generation, video job submission, worker completion, worker failure handling, Vertex video, Runpod video, and provider routing.
-- Real Vertex, Runpod, and Telegram verification still depends on configured credentials and a manual runtime check.
+- Tests exist under `tests/` for health and readiness behavior, normalization, reply-to-photo reference commands, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, supersession, Telegram formatting, image generation, video job submission, worker completion, worker failure handling, Vertex video, Runpod video, Fal video, provider routing, and settings provider exposure.
+- Phase 6 now has a `FalVideoProvider` adapter behind the existing `VideoGenerator` interface, using the Fal queue REST API (`https://queue.fal.run/{model_id}`) with submit, status, and result polling.
+- Phase 6 supports Fal-hosted Kling, Seedance 2.0, and Gemini Omni Flash endpoints for text-to-video, image-to-video, and reference-to-video modes by inferring the model family and mode from the configured endpoint path.
+- Reference images are sent to Fal as base64 data URIs using the correct parameter name per model family (`start_image_url` for Kling, `image_url` for Seedance/Gemini, `image_urls` for reference-to-video).
+- Phase 6 exposes `"fal"` as a selectable video provider in `/settings`; exact model endpoints remain environment-only.
+- Real Vertex, Runpod, Fal, and Telegram verification still depends on configured credentials and a manual runtime check.
 - Inline generated video bytes remain transient in memory only, while URI-backed assets are expected to live in a bucket with lifecycle cleanup managed outside the app.
 - Phase 4 includes a real webhook deployment path: webhook mode now registers the Telegram webhook on startup, validates the `X-Telegram-Bot-Api-Secret-Token` header on inbound requests, and reports webhook setup state through readiness.
 - Phase 4 now logs usage units and optional best-effort cost estimates for OpenAI chat, Vertex image generation, Vertex/Runpod video submission, and completed video delivery without adding a metrics backend or billing reconciliation.
@@ -377,13 +381,14 @@ Let the existing queued `/video` flow use Fal-hosted video models as an addition
 - Model-specific capabilities such as Kling 3 native audio, Seedance reference inputs, duration options, and aspect ratios should be introduced as whitelisted presets instead of free-form user controls.
 - If a Fal result URL is temporary, Phase 6 still does not add durable in-app retention. Delivery should happen promptly, and durable storage remains a separate future decision.
 
-### Decisions Needed
+### Decisions (Resolved)
 
-- whether the first Fal model preset should target Kling 3, Seedance 2, or both
-- whether `provider="fal"` is enough in persisted jobs or whether the provider identifier should include the hosted model family
-- how Fal model presets map onto the current video duration, orientation, and reference-image settings
-- whether `/settings` should expose Fal as a provider option immediately or keep it environment-only for the first manual test slice
-- how to represent Fal cost estimates in the existing log-only observability fields
+- The first Fal model preset targets `fal-ai/kling-video/v3/standard/text-to-video` for text-to-video and supports additional per-mode endpoints via `FAL_VIDEO_IMAGE_TO_VIDEO_MODEL`, `FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL`, and `FAL_VIDEO_EDIT_MODEL`.
+- Persisted jobs use `provider="fal"`; the exact endpoint path is stored in the `model` column.
+- Per-mode model endpoints are selected automatically based on whether the `/video` command includes a reference image and which endpoints are configured.
+- Aspect ratio (Kling, Gemini) and resolution (Seedance) are controlled by the existing orientation presets and `FAL_VIDEO_RESOLUTION`; duration is passed in the type expected by each model family.
+- `/settings` exposes `"fal"` as a video provider option; exact model selection remains environment-only.
+- Cost estimates reuse the same log-only `cost_per_second_usd` pattern via `FAL_VIDEO_COST_PER_SECOND_USD`.
 
 ### Exit Criteria
 

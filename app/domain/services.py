@@ -768,7 +768,11 @@ class ChatService:
                 else "auto"
             )
         )
-        requested_provider = "runpod" if provider_hint == "runpod" else "vertex"
+        requested_provider = (
+            self.settings.video_provider_order[0]
+            if provider_hint == "auto"
+            else provider_hint
+        )
         requested_pipeline = None
         requested_num_inference_steps = None
         requested_seed = None
@@ -789,11 +793,43 @@ class ChatService:
             if message.image is not None and reference_strength_preset is not None:
                 requested_image_strength = reference_strength_preset.image_strength
 
-        requested_model = (
-            pipeline_preset.model
-            if requested_provider == "runpod" and pipeline_preset is not None
-            else self._video_model_for_provider(requested_provider)
-        )
+        requested_model: str | None = None
+        requested_resolution: str | None = None
+        if requested_provider == "fal":
+            if message.image is not None:
+                requested_model = (
+                    self.settings.fal_video_reference_to_video_model
+                    or self.settings.fal_video_image_to_video_model
+                    or self.settings.fal_video_model
+                )
+            else:
+                requested_model = self.settings.fal_video_model
+            requested_resolution = self.settings.fal_video_resolution
+            model_locked = True
+        elif requested_provider == "runpod":
+            if pipeline_preset is not None:
+                requested_model = pipeline_preset.model
+                model_locked = True
+            if requested_pipeline == "two_stage" and quality_preset is not None:
+                requested_num_inference_steps = quality_preset.num_inference_steps
+            if seed_preset is not None:
+                requested_seed = (
+                    random.randint(0, 2_147_483_647)
+                    if seed_preset.randomize
+                    else seed_preset.seed
+                )
+            if message.image is not None and reference_strength_preset is not None:
+                requested_image_strength = reference_strength_preset.image_strength
+            requested_model = requested_model or self._video_model_for_provider(
+                requested_provider
+            )
+        elif requested_provider == "fal":
+            requested_model = requested_model or self._video_model_for_provider(
+                requested_provider
+            )
+        else:
+            requested_model = self._video_model_for_provider(requested_provider)
+
         requested_aspect_ratio = (
             orientation_preset.vertex_aspect_ratio
             if orientation_preset is not None
@@ -850,6 +886,7 @@ class ChatService:
                 runpod_num_inference_steps=requested_num_inference_steps,
                 runpod_seed=requested_seed,
                 runpod_image_strength=requested_image_strength,
+                resolution=requested_resolution,
                 **usage_fields,
             )
         )
@@ -872,6 +909,7 @@ class ChatService:
                 seed=requested_seed,
                 image_strength=requested_image_strength,
                 model_locked=model_locked,
+                resolution=requested_resolution,
             )
         )
         self.logger.info(
@@ -1197,12 +1235,10 @@ class ChatService:
         if self._is_image_command(message):
             return ("vertex", self.settings.vertex_image_model)
         if self._is_video_command(message):
-            provider = (
-                "runpod"
-                if (message.command or "").lower() == "/video_ltx"
-                else "vertex"
-            )
-            return (provider, self._video_model_for_provider(provider))
+            if (message.command or "").lower() == "/video_ltx":
+                return ("runpod", self._video_model_for_provider("runpod"))
+            first_provider = self.settings.video_provider_order[0]
+            return (first_provider, self._video_model_for_provider(first_provider))
         if message.message_type != "command":
             return ("openai", self.settings.openai_model)
         return (None, None)
@@ -1222,16 +1258,22 @@ class ChatService:
     def _video_model_for_provider(self, provider: str) -> str:
         if provider == "runpod":
             return self.settings.runpod_video_model
+        if provider == "fal":
+            return self.settings.fal_video_model
         return self.settings.vertex_video_model
 
     def _video_cost_for_provider(self, provider: str) -> float:
         if provider == "runpod":
             return self.settings.runpod_video_cost_per_second_usd
+        if provider == "fal":
+            return self.settings.fal_video_cost_per_second_usd
         return self.settings.vertex_video_cost_per_second_usd
 
     def _video_duration_for_provider(self, provider: str) -> int | None:
         if provider == "runpod":
             return self.settings.runpod_video_duration_seconds
+        if provider == "fal":
+            return self.settings.vertex_video_duration_seconds
         return self.settings.vertex_video_duration_seconds
 
     def _video_status_model(self) -> str:
@@ -1240,6 +1282,8 @@ class ChatService:
             enabled_models.append(f"vertex:{self.settings.vertex_video_model}")
         if self.settings.runpod_video_generation_enabled:
             enabled_models.append(f"runpod:{self.settings.runpod_video_model}")
+        if self.settings.fal_video_generation_enabled:
+            enabled_models.append(f"fal:{self.settings.fal_video_model}")
         return ", ".join(enabled_models) or self.settings.vertex_video_model
 
     def _drafts_enabled(

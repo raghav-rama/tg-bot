@@ -664,6 +664,85 @@ async def test_video_command_queues_generation_job(service_bundle) -> None:
     assert emitter.sent_videos == []
 
 
+def _enable_fal_for(service, *, model: str = "fal-ai/kling-video/v3/standard/text-to-video", image_to_video_model: str | None = None, reference_to_video_model: str | None = None) -> None:
+    service.settings.video_provider_order = ("fal",)
+    service.settings.fal_video_model = model
+    service.settings.fal_video_image_to_video_model = image_to_video_model
+    service.settings.fal_video_reference_to_video_model = reference_to_video_model
+    service.settings.fal_video_resolution = "720p"
+
+
+async def test_video_fal_first_provider_order_uses_fal_model(service_bundle) -> None:
+    service = service_bundle["service"]
+    video_generator = service_bundle["video_generator"]
+
+    _enable_fal_for(service)
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=990,
+            command="/video glowing particles drifting in a dark corridor",
+            update_id=90,
+        ),
+    )
+
+    request = video_generator.submit_calls[0]
+    assert request.provider_hint == "auto"
+    assert request.model == "fal-ai/kling-video/v3/standard/text-to-video"
+    assert request.resolution == "720p"
+
+
+async def test_video_fal_provider_preference_sets_provider_hint_and_model(service_bundle) -> None:
+    service = service_bundle["service"]
+    preferences = service_bundle["preferences"]
+    video_generator = service_bundle["video_generator"]
+
+    _enable_fal_for(service)
+    await preferences.set_preference(
+        chat_id=992,
+        user_id=42,
+        preference_type="video_provider",
+        preset_id="fal",
+        updated_at=utc_datetime(),
+    )
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=992,
+            command="/video glowing particles drifting in a dark corridor",
+            update_id=92,
+        ),
+    )
+
+    request = video_generator.submit_calls[0]
+    assert request.provider_hint == "fal"
+    assert request.model == "fal-ai/kling-video/v3/standard/text-to-video"
+
+
+async def test_video_fal_with_reference_image_prefers_reference_to_video_model(service_bundle) -> None:
+    service = service_bundle["service"]
+    video_generator = service_bundle["video_generator"]
+
+    _enable_fal_for(
+        service,
+        image_to_video_model="fal-ai/kling-video/v3/standard/image-to-video",
+        reference_to_video_model="bytedance/seedance-2.0/reference-to-video",
+    )
+    await service.handle_inbound(
+        make_image_command_message(
+            user_id=42,
+            chat_id=991,
+            command="/video slow push across the still life",
+            update_id=91,
+        ),
+    )
+
+    request = video_generator.submit_calls[0]
+    assert request.provider_hint == "auto"
+    assert request.model == "bytedance/seedance-2.0/reference-to-video"
+    assert request.resolution == "720p"
+
+
 async def test_video_ltx_command_submits_runpod_job(service_bundle) -> None:
     service = service_bundle["service"]
     conversations = service_bundle["conversations"]

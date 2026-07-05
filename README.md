@@ -138,9 +138,32 @@ VERTEX_API_KEY=your-vertex-api-key
 # VERTEX_IMAGE_COST_PER_IMAGE_USD=0
 # VERTEX_VIDEO_COST_PER_SECOND_USD=0
 
+# Optional Fal video provider for /video
+# FAL_API_KEY=your-fal-api-key
+# FAL_VIDEO_MODEL=fal-ai/kling-video/v3/standard/text-to-video
+# FAL_VIDEO_IMAGE_TO_VIDEO_MODEL=fal-ai/kling-video/v3/standard/image-to-video
+# FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL=bytedance/seedance-2.0/reference-to-video
+# FAL_VIDEO_RESOLUTION=720p
+
 # Optional Runpod LTX fallback for /video and manual /video_ltx
-# VIDEO_PROVIDER_ORDER=vertex,runpod
 # RUNPOD_API_KEY=your-runpod-api-key
+# RUNPOD_VIDEO_ENDPOINT_ID=your-runpod-serverless-endpoint-id
+# RUNPOD_VIDEO_BASE_URL=https://api.runpod.ai/v2
+# RUNPOD_VIDEO_MODEL=ltx-2.3-22b-distilled-1.1
+# RUNPOD_VIDEO_WIDTH=576
+# RUNPOD_VIDEO_HEIGHT=1024
+# RUNPOD_VIDEO_DURATION_SECONDS=4
+# RUNPOD_VIDEO_FRAME_RATE=24
+# RUNPOD_VIDEO_EXECUTION_TIMEOUT_MS=1800000
+# RUNPOD_VIDEO_TTL_MS=7200000
+# RUNPOD_VIDEO_REFERENCE_IMAGE_MAX_BYTES=6000000
+# RUNPOD_VIDEO_SIGNED_URL_TTL_SECONDS=3600
+# RUNPOD_VIDEO_COST_PER_SECOND_USD=0
+
+# Example video provider order. Default is "vertex,runpod".
+# Add "fal" only when FAL_API_KEY is configured, e.g.:
+# VIDEO_PROVIDER_ORDER=vertex,runpod,fal
+# VERTEX_VIDEO_ASPECT_RATIO=9:16
 # RUNPOD_VIDEO_ENDPOINT_ID=your-runpod-serverless-endpoint-id
 # RUNPOD_VIDEO_BASE_URL=https://api.runpod.ai/v2
 # RUNPOD_VIDEO_MODEL=ltx-2.3-22b-distilled-1.1
@@ -226,6 +249,24 @@ Vertex video settings:
 - `TELEGRAM_VIDEO_REQUEST_TIMEOUT_SECONDS`
 - `VIDEO_JOB_POLL_INTERVAL_SECONDS`
 - `VERTEX_VIDEO_COST_PER_SECOND_USD`: optional log-only estimate rate, default `0`
+
+Fal video settings:
+
+- `FAL_API_KEY`: required to enable Fal video generation
+- `FAL_VIDEO_BASE_URL`: default `https://queue.fal.run`
+- `FAL_VIDEO_MODEL`: default `fal-ai/kling-video/v3/standard/text-to-video`
+- `FAL_VIDEO_IMAGE_TO_VIDEO_MODEL`: optional image-to-video endpoint (e.g. `fal-ai/kling-video/v3/standard/image-to-video`)
+- `FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL`: optional reference-to-video endpoint (e.g. `bytedance/seedance-2.0/reference-to-video`)
+- `FAL_VIDEO_EDIT_MODEL`: optional video-to-video endpoint (requires future video-input support)
+- `FAL_VIDEO_RESOLUTION`: Seedance resolution preset, default `720p`
+- `FAL_VIDEO_REFERENCE_IMAGE_MAX_BYTES`: default `6000000`
+- `FAL_VIDEO_COST_PER_SECOND_USD`: optional log-only estimate rate, default `0`
+- `FAL_VIDEO_SUBMIT_TIMEOUT_SECONDS`: HTTP timeout for submit/status calls, default `45`
+
+Supported Fal model families include Kling (`fal-ai/kling-video`), Seedance 2.0 (`bytedance/seedance-2.0`), and Gemini Omni Flash (`google/gemini-omni-flash`). The `/video` command dispatches to the configured per-mode endpoint:
+
+- text-only `/video` uses `FAL_VIDEO_MODEL`
+- `/video` with a reference photo uses `FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL` if set, otherwise `FAL_VIDEO_IMAGE_TO_VIDEO_MODEL`, otherwise falls back to text-to-video
 
 Runpod video settings:
 
@@ -322,7 +363,7 @@ SQLITE_PATH=/app/volume/data/bot.db
 - `/reset`: archive the current conversation and start a fresh one
 - `/settings`: choose per-chat/per-user video, image, and chat settings with inline buttons
 - `/image <prompt>`: generate one image through Vertex AI
-- `/video <prompt>`: queue one short video through Vertex AI, with Runpod fallback only on Vertex safety rejections
+- `/video <prompt>`: queue one short video through the configured providers (Vertex, Runpod, or Fal), with Runpod fallback only on Vertex safety rejections
 - `/video_ltx <prompt>`: queue one short video directly through Runpod LTX
 
 Reference-image commands:

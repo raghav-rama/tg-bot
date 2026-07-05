@@ -131,6 +131,16 @@ def test_presets_map_to_request_overrides() -> None:
     assert image_preset.output_mime_type == "image/jpeg"
 
 
+def test_video_provider_preset_includes_fal() -> None:
+    fal_preset = video_provider_preset_for("fal")
+    auto_preset = video_provider_preset_for("auto")
+
+    assert fal_preset is not None
+    assert fal_preset.provider_hint == "fal"
+    assert "Fal" in fal_preset.label
+    assert auto_preset.provider_hint == "auto"
+
+
 def test_image_settings_menu_has_clear_gemini_portrait_option() -> None:
     menu = settings_menu_for(preference_type="image")
     labels = [button.text for row in menu.rows for button in row]

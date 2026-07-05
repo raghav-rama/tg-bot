@@ -47,3 +47,24 @@ async def test_processor_handles_settings_callback(service_bundle) -> None:
     assert callback.answers == [{"text": "Settings updated."}]
     assert "Video duration: ⏱️ 8s" in callback.message.edits[0]["text"]
     assert callback.message.edits[0]["reply_markup"] is not None
+
+
+async def test_processor_handles_fal_provider_settings_callback(service_bundle) -> None:
+    processor = TelegramUpdateProcessor(
+        chat_service=service_bundle["service"],
+        settings=service_bundle["settings"],
+    )
+    callback = FakeCallbackQuery(
+        data="prefs:video_provider:fal",
+    )
+
+    await processor.process_callback(callback=callback, update_id=78)
+
+    stored = await service_bundle["preferences"].get_preference(
+        chat_id=100,
+        user_id=42,
+        preference_type="video_provider",
+    )
+    assert stored is not None
+    assert stored.preset_id == "fal"
+    assert "Video provider: 🌌 Fal" in callback.message.edits[0]["text"]

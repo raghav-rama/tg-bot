@@ -41,6 +41,7 @@ VIDEO_GENERATION_NOT_CONFIGURED_TEXT = "Video generation is not configured right
 VIDEO_GENERATION_QUEUED_TEXT = (
     "Video generation started. I'll send it here when it's ready."
 )
+
 VIDEO_GENERATION_RETRY_TEXT = (
     "I couldn't generate a video just now. Please try again in a moment."
 )
@@ -79,7 +80,7 @@ def render_help_message() -> str:
         "/reset - start a fresh conversation for this chat\n"
         "/settings - tune video, image, and chat presets\n"
         "/image <prompt> - generate one image with Vertex AI\n"
-        "/video <prompt> - queue one short video with Vertex AI and Runpod fallback\n"
+        "/video <prompt> - queue one short video with the configured providers\n"
         "/video_ltx <prompt> - queue one short video directly with Runpod LTX\n\n"
         "Supported inputs:\n"
         "- text messages\n"
