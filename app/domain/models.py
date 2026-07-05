@@ -321,3 +321,5 @@ class ServiceReply:
     suppressed: bool = False
     usage_fields: dict[str, Any] = field(default_factory=dict)
     settings_menu: SettingsMenu | None = None
+    provider: str | None = None
+    model: str | None = None

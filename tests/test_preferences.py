@@ -64,11 +64,18 @@ async def test_preference_repository_upserts_per_chat_user(service_bundle) -> No
 
 
 def test_settings_menu_uses_compact_callback_data() -> None:
-    main_menu = settings_menu_for()
-    menu = settings_menu_for(preference_type="video")
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+    )
+    main_menu = settings_menu_for(settings=settings)
+    menu = settings_menu_for(preference_type="video", settings=settings)
     duration_menu = settings_menu_for(
         preference_type="video_duration",
         active_preset_id="duration_6s",
+        settings=settings,
     )
 
     video_menu_callback_data = [

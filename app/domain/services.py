@@ -268,8 +268,8 @@ class ChatService:
                     user_id=message.user_id,
                     command=message.command,
                     message_type=message.message_type,
-                    provider=provider_name,
-                    model=model_name,
+                    provider=reply.provider or provider_name,
+                    model=reply.model or model_name,
                     latency_ms=latency_ms,
                     delivered=reply.delivered,
                     **reply.usage_fields,
@@ -717,7 +717,13 @@ class ChatService:
                 "file_size": sent_photo.file_size,
             }
         )
-        return ServiceReply(text="", delivered=True, usage_fields=usage_fields)
+        return ServiceReply(
+            text="",
+            delivered=True,
+            usage_fields=usage_fields,
+            provider="vertex",
+            model=image_model,
+        )
 
     async def _handle_video_command(
         self,
@@ -950,28 +956,51 @@ class ChatService:
                 **usage_fields,
             )
         )
-        submitted_job = await self.video_generator.submit_video(
-            VideoGenerationRequest(
-                chat_id=message.chat_id,
-                user_id=message.user_id,
-                prompt=prompt,
-                model=requested_model,
-                aspect_ratio=requested_aspect_ratio,
-                duration_seconds=requested_duration_seconds,
-                output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
-                reference_image=message.image,
-                provider_hint=provider_hint,
-                width=requested_width,
-                height=requested_height,
-                frame_rate=requested_frame_rate,
-                pipeline=requested_pipeline,
-                num_inference_steps=requested_num_inference_steps,
-                seed=requested_seed,
-                image_strength=requested_image_strength,
-                model_locked=model_locked,
-                resolution=requested_resolution,
+        try:
+            submitted_job = await self.video_generator.submit_video(
+                VideoGenerationRequest(
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    prompt=prompt,
+                    model=requested_model,
+                    aspect_ratio=requested_aspect_ratio,
+                    duration_seconds=requested_duration_seconds,
+                    output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
+                    reference_image=message.image,
+                    provider_hint=provider_hint,
+                    width=requested_width,
+                    height=requested_height,
+                    frame_rate=requested_frame_rate,
+                    pipeline=requested_pipeline,
+                    num_inference_steps=requested_num_inference_steps,
+                    seed=requested_seed,
+                    image_strength=requested_image_strength,
+                    model_locked=model_locked,
+                    resolution=requested_resolution,
+                )
             )
-        )
+        except (ProviderTimeoutError, ProviderUpstreamError) as exc:
+            self.logger.warning(
+                log_kv(
+                    "provider_failure",
+                    update_id=message.update_id,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    message_type=message.message_type,
+                    provider=requested_provider,
+                    model=requested_model,
+                    error_type=type(exc).__name__,
+                ),
+                exc_info=True,
+            )
+            await self._persist_command_reply(conversation, VIDEO_GENERATION_RETRY_TEXT)
+            await self.conversations.touch(conversation.id)
+            return ServiceReply(
+                text=VIDEO_GENERATION_RETRY_TEXT,
+                provider=requested_provider,
+                model=requested_model,
+            )
+
         self.logger.info(
             log_kv(
                 "video_generation_queued",
@@ -1002,7 +1031,12 @@ class ChatService:
             duration_seconds=requested_duration_seconds,
             cost_per_second_usd=self._video_cost_for_provider(submitted_job.provider),
         )
-        return ServiceReply(text=VIDEO_GENERATION_QUEUED_TEXT, usage_fields=usage_fields)
+        return ServiceReply(
+            text=VIDEO_GENERATION_QUEUED_TEXT,
+            usage_fields=usage_fields,
+            provider=submitted_job.provider,
+            model=submitted_job.raw_model,
+        )
 
     async def _persist_command_exchange(
         self,
