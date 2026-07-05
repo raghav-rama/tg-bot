@@ -99,6 +99,29 @@ async def test_auto_video_falls_back_to_runpod_on_vertex_safety_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_auto_video_does_not_fallback_to_runpod_when_excluded_from_order() -> None:
+    vertex = FakeVideoProvider(
+        provider="vertex",
+        error=ProviderSafetyError("Vertex rejected the video prompt as unsafe"),
+    )
+    runpod = FakeVideoProvider(provider="runpod")
+    router = VideoProviderRouter(
+        providers={"vertex": vertex, "runpod": runpod},
+        provider_order=("vertex", "fal"),
+        provider_models={
+            "vertex": "veo-3.0-fast-generate-001",
+            "runpod": "ltx-2.3-22b-distilled-1.1",
+            "fal": "fal-ai/kling-video/v3/standard/text-to-video",
+        },
+    )
+
+    with pytest.raises(ProviderSafetyError):
+        await router.submit_video(make_request())
+
+    assert runpod.submit_calls == []
+
+
+@pytest.mark.asyncio
 async def test_auto_video_does_not_fallback_on_timeout_or_generic_errors() -> None:
     for error in (
         ProviderTimeoutError("timed out"),

@@ -45,18 +45,22 @@ class VideoProviderRouter:
                 return await self._submit_to_provider(request, provider_name)
             except ProviderSafetyError as exc:
                 last_safety_error = exc
+                runpod_allowed = (
+                    provider_name == "vertex"
+                    and "runpod" in self.provider_order
+                    and "runpod" in self.providers
+                )
                 self.logger.warning(
                     log_kv(
                         "video_provider_safety_rejection",
                         provider=provider_name,
-                        fallback_provider="runpod" if provider_name == "vertex" else None,
+                        fallback_provider="runpod" if runpod_allowed else None,
                         model=self.provider_models.get(provider_name),
                     )
                 )
                 if provider_name != "vertex":
                     raise
-                runpod_provider = self.providers.get("runpod")
-                if runpod_provider is None:
+                if not runpod_allowed:
                     raise
                 try:
                     return await self._submit_to_provider(request, "runpod")
