@@ -341,7 +341,7 @@ class ChatService:
                 error_type="UnauthorizedUserError",
             )
 
-        parsed = parse_settings_callback(callback_data)
+        parsed = parse_settings_callback(callback_data, settings=self.settings)
         if parsed is None:
             return ServiceReply(text=UNKNOWN_SETTINGS_TEXT, error_type="ValidationError")
 

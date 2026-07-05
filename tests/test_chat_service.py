@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
+from pydantic import SecretStr
+
 from app.config import Settings
 from app.domain.commands import (
     ACCESS_DENIED_TEXT,
@@ -325,6 +327,32 @@ async def test_settings_callback_persists_user_preference(service_bundle) -> Non
     assert stored.preset_id == "runpod"
     assert "Video provider: 🚀 Runpod LTX" in reply.text
     assert reply.settings_menu is not None
+
+
+async def test_settings_callback_accepts_fal_model_from_runtime_settings(service_bundle) -> None:
+    service = service_bundle["service"]
+    preferences = service_bundle["preferences"]
+
+    service.settings.fal_api_key = SecretStr("test-fal-key")
+    service.settings.fal_video_text_to_video_model = "fal-ai/kling-video/v3/standard/text-to-video"
+    service.settings.fal_video_reference_to_video_model = (
+        "bytedance/seedance-2.0/reference-to-video"
+    )
+
+    reply = await service.handle_settings_callback(
+        chat_id=100,
+        user_id=42,
+        callback_data="prefs:fal_video_model:seedance",
+    )
+    stored = await preferences.get_preference(
+        chat_id=100,
+        user_id=42,
+        preference_type="fal_video_model",
+    )
+
+    assert stored is not None
+    assert stored.preset_id == "seedance"
+    assert "Fal model: 🌌 Seedance" in reply.text
 
 
 async def test_text_message_logs_token_usage_and_cost_estimate(
