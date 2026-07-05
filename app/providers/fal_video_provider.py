@@ -208,7 +208,7 @@ class FalVideoProvider:
                 failure_reason=f"Fal video generation returned unknown status: {status}",
             )
 
-        result_url = f"{self.base_url}/{model}/requests/{request.operation_name}"
+        result_url = f"{self.base_url}/{model}/requests/{request.operation_name}/response"
         result_response = await self._request("GET", result_url)
         result_body = self._json_body(result_response)
 
@@ -286,8 +286,31 @@ class FalVideoProvider:
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code in {408, 504}:
                 raise ProviderTimeoutError("Fal video generation timed out") from exc
-            raise ProviderUpstreamError("Fal video generation failed") from exc
+            try:
+                body = exc.response.text[:500]
+            except Exception:
+                body = "<unable to read body>"
+            self.logger.warning(
+                log_kv(
+                    "fal_video_http_error",
+                    method=method,
+                    url=url,
+                    status_code=exc.response.status_code,
+                    response_body=body,
+                )
+            )
+            raise ProviderUpstreamError(
+                f"Fal video generation failed (HTTP {exc.response.status_code}): {body}"
+            ) from exc
         except httpx.HTTPError as exc:
+            self.logger.warning(
+                log_kv(
+                    "fal_video_http_error",
+                    method=method,
+                    url=url,
+                    error=str(exc),
+                )
+            )
             raise ProviderUpstreamError("Fal video generation failed") from exc
 
     @staticmethod
