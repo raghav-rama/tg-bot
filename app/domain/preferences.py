@@ -105,6 +105,11 @@ VIDEO_PROVIDER_PRESETS: dict[str, VideoProviderPreset] = {
         label="🚀 Runpod LTX",
         provider_hint="runpod",
     ),
+    "fal": VideoProviderPreset(
+        id="fal",
+        label="🌌 Fal",
+        provider_hint="fal",
+    ),
 }
 
 VIDEO_DURATION_PRESETS: dict[str, VideoDurationPreset] = {

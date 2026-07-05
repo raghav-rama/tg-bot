@@ -8,8 +8,8 @@ MessageType = Literal["text", "image", "command"]
 Role = Literal["user", "assistant"]
 ChatType = Literal["private", "group", "supergroup", "channel"]
 GenerationJobStatus = Literal["queued", "running", "completed", "failed"]
-VideoProviderName = Literal["vertex", "runpod"]
-VideoProviderHint = Literal["auto", "vertex", "runpod"]
+VideoProviderName = Literal["vertex", "runpod", "fal"]
+VideoProviderHint = Literal["auto", "vertex", "runpod", "fal"]
 PreferenceType = Literal[
     "video",
     "video_provider",
@@ -210,6 +210,7 @@ class VideoGenerationRequest:
     num_inference_steps: int | None = None
     seed: int | None = None
     image_strength: float | None = None
+    resolution: str | None = None
     model_locked: bool = False
 
 
