@@ -41,13 +41,13 @@ class FakeVideoProvider:
         return None
 
 
-def make_request(*, provider_hint: str = "auto") -> VideoGenerationRequest:
+def make_request(*, provider_hint: str = "auto", model: str | None = None) -> VideoGenerationRequest:
     return VideoGenerationRequest(
         chat_id=1,
         user_id=42,
         prompt="tracking shot through a glowing cave",
-        model="veo-3.0-fast-generate-001",
-        aspect_ratio="16:9",
+        model=model or "veo-3.0-fast-generate-001",
+        aspect_ratio="9:16",
         duration_seconds=4,
         output_gcs_uri=None,
         provider_hint=provider_hint,
@@ -96,6 +96,29 @@ async def test_auto_video_falls_back_to_runpod_on_vertex_safety_error() -> None:
     assert submitted.provider == "runpod"
     assert runpod.submit_calls[0].provider_hint == "runpod"
     assert runpod.submit_calls[0].model == "ltx-2.3-22b-distilled-1.1"
+
+
+@pytest.mark.asyncio
+async def test_auto_video_does_not_fallback_to_runpod_when_excluded_from_order() -> None:
+    vertex = FakeVideoProvider(
+        provider="vertex",
+        error=ProviderSafetyError("Vertex rejected the video prompt as unsafe"),
+    )
+    runpod = FakeVideoProvider(provider="runpod")
+    router = VideoProviderRouter(
+        providers={"vertex": vertex, "runpod": runpod},
+        provider_order=("vertex", "fal"),
+        provider_models={
+            "vertex": "veo-3.0-fast-generate-001",
+            "runpod": "ltx-2.3-22b-distilled-1.1",
+            "fal": "fal-ai/kling-video/v3/standard/text-to-video",
+        },
+    )
+
+    with pytest.raises(ProviderSafetyError):
+        await router.submit_video(make_request())
+
+    assert runpod.submit_calls == []
 
 
 @pytest.mark.asyncio
@@ -166,3 +189,73 @@ async def test_poll_video_delegates_to_persisted_provider() -> None:
     assert result.status == "running"
     assert runpod.poll_calls[0].operation_name == "runpod-job-1"
     assert vertex.poll_calls == []
+
+
+@pytest.mark.asyncio
+async def test_fal_hint_submits_directly_to_fal() -> None:
+    vertex = FakeVideoProvider(provider="vertex")
+    runpod = FakeVideoProvider(provider="runpod")
+    fal = FakeVideoProvider(provider="fal")
+    router = VideoProviderRouter(
+        providers={"vertex": vertex, "runpod": runpod, "fal": fal},
+        provider_order=("vertex", "runpod", "fal"),
+        provider_models={
+            "vertex": "veo-3.0-fast-generate-001",
+            "runpod": "ltx-2.3-22b-distilled-1.1",
+            "fal": "fal-ai/kling-video/v3/standard/text-to-video",
+        },
+    )
+
+    submitted = await router.submit_video(
+        make_request(provider_hint="fal", model="fal-ai/kling-video/v3/standard/text-to-video")
+    )
+
+    assert submitted.provider == "fal"
+    assert vertex.submit_calls == []
+    assert runpod.submit_calls == []
+    assert fal.submit_calls[0].provider_hint == "fal"
+
+
+@pytest.mark.asyncio
+async def test_auto_video_does_not_fallback_to_fal_on_vertex_safety_error() -> None:
+    vertex = FakeVideoProvider(
+        provider="vertex",
+        error=ProviderSafetyError("Vertex rejected the video prompt as unsafe"),
+    )
+    runpod = FakeVideoProvider(provider="runpod")
+    fal = FakeVideoProvider(provider="fal")
+    router = VideoProviderRouter(
+        providers={"vertex": vertex, "runpod": runpod, "fal": fal},
+        provider_order=("vertex", "fal", "runpod"),
+        provider_models={
+            "vertex": "veo-3.0-fast-generate-001",
+            "runpod": "ltx-2.3-22b-distilled-1.1",
+            "fal": "fal-ai/kling-video/v3/standard/text-to-video",
+        },
+    )
+
+    submitted = await router.submit_video(make_request())
+
+    assert submitted.provider == "runpod"
+    assert fal.submit_calls == []
+    assert runpod.submit_calls[0].model == "ltx-2.3-22b-distilled-1.1"
+
+
+@pytest.mark.asyncio
+async def test_auto_video_uses_fal_when_first_in_order() -> None:
+    vertex = FakeVideoProvider(provider="vertex")
+    fal = FakeVideoProvider(provider="fal")
+    router = VideoProviderRouter(
+        providers={"vertex": vertex, "fal": fal},
+        provider_order=("fal", "vertex"),
+        provider_models={
+            "vertex": "veo-3.0-fast-generate-001",
+            "fal": "fal-ai/kling-video/v3/standard/text-to-video",
+        },
+    )
+
+    submitted = await router.submit_video(make_request())
+
+    assert submitted.provider == "fal"
+    assert fal.submit_calls[0].model == "fal-ai/kling-video/v3/standard/text-to-video"
+    assert vertex.submit_calls == []

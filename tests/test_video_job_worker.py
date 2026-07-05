@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.methods import SendVideo
 
+from app.domain.errors import ProviderUpstreamError
 from app.domain.models import InboundMessage, SentPhoto, SentVideo, VideoJobPollResult
 from app.workers.video_jobs import VideoJobWorker
 
@@ -372,3 +373,142 @@ async def test_worker_logs_and_persists_delivery_exception_details(
     assert "video_job_delivery_exception" in caplog.text
     assert "error_type=TelegramNetworkError" in caplog.text
     assert "Request timeout error" in caplog.text
+
+
+async def test_worker_uses_fal_cost_rate_for_fal_jobs(service_bundle) -> None:
+    settings = service_bundle["settings"]
+    worker = VideoJobWorker(
+        settings=settings,
+        conversations=service_bundle["conversations"],
+        messages=service_bundle["messages"],
+        generation_jobs=service_bundle["generation_jobs"],
+        video_generator=service_bundle["video_generator"],
+        emitter_factory=lambda _chat_id: RecordingEmitter(),
+    )
+    settings.fal_video_cost_per_second_usd = 0.42
+    settings.vertex_video_cost_per_second_usd = 0.10
+    settings.runpod_video_cost_per_second_usd = 0.20
+
+    assert worker._video_cost_for_provider("fal") == 0.42
+    assert worker._video_cost_for_provider("runpod") == 0.20
+    assert worker._video_cost_for_provider("vertex") == 0.10
+
+
+async def test_worker_completes_fal_job_and_delivers_video(service_bundle) -> None:
+    settings = service_bundle["settings"]
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    messages = service_bundle["messages"]
+    generation_jobs = service_bundle["generation_jobs"]
+    video_generator = service_bundle["video_generator"]
+    preferences = service_bundle["preferences"]
+
+    settings.fal_api_key = "fake-fal-key"
+    settings.fal_video_model = "fal-ai/kling-video/v3/standard/text-to-video"
+    settings.video_provider_order = ("fal",)
+    await preferences.set_preference(
+        chat_id=510,
+        user_id=42,
+        preference_type="video_provider",
+        preset_id="fal",
+        updated_at=utc_datetime(),
+    )
+
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=510,
+            command="/video tracking shot through a luminous underground cave",
+            update_id=10,
+        )
+    )
+    conversation = await conversations.get_active(510)
+    assert conversation is not None
+
+    emitter = RecordingEmitter()
+    worker = VideoJobWorker(
+        settings=settings,
+        conversations=conversations,
+        messages=messages,
+        generation_jobs=generation_jobs,
+        video_generator=video_generator,
+        emitter_factory=lambda _chat_id: emitter,
+    )
+
+    processed = await worker.run_once()
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+
+    assert processed == 1
+    assert video_generator.submit_calls[0].provider_hint == "fal"
+    assert video_generator.submit_calls[0].model == "fal-ai/kling-video/v3/standard/text-to-video"
+    assert video_generator.poll_calls[0].provider == "fal"
+    assert emitter.sent_videos == [b"generated-video"]
+    assert emitter.sent_texts == ["Your video is ready."]
+    assert stored_jobs[0].status == "completed"
+    assert stored_jobs[0].provider == "fal"
+    assert stored_jobs[0].model == "fal-ai/kling-video/v3/standard/text-to-video"
+    assert stored_jobs[0].telegram_file_id == "tg-video-9500"
+    assert stored_jobs[0].output_uri is None
+
+
+async def test_worker_marks_fal_job_failed_on_poll_failure(service_bundle) -> None:
+    settings = service_bundle["settings"]
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    messages = service_bundle["messages"]
+    generation_jobs = service_bundle["generation_jobs"]
+    video_generator = service_bundle["video_generator"]
+    preferences = service_bundle["preferences"]
+
+    settings.fal_api_key = "fake-fal-key"
+    settings.fal_video_model = "fal-ai/kling-video/v3/standard/text-to-video"
+    settings.video_provider_order = ("fal",)
+    await preferences.set_preference(
+        chat_id=511,
+        user_id=42,
+        preference_type="video_provider",
+        preset_id="fal",
+        updated_at=utc_datetime(),
+    )
+    video_generator.poll_results = [
+        VideoJobPollResult(
+            status="failed",
+            operation_name="operations/1",
+            failure_reason="Fal capacity exhausted",
+        ),
+    ]
+
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=511,
+            command="/video ocean waves crashing against black volcanic rock",
+            update_id=11,
+        )
+    )
+    conversation = await conversations.get_active(511)
+    assert conversation is not None
+
+    emitter = RecordingEmitter()
+    worker = VideoJobWorker(
+        settings=settings,
+        conversations=conversations,
+        messages=messages,
+        generation_jobs=generation_jobs,
+        video_generator=video_generator,
+        emitter_factory=lambda _chat_id: emitter,
+    )
+
+    processed = await worker.run_once()
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+
+    assert processed == 1
+    assert video_generator.submit_calls[0].provider_hint == "fal"
+    assert video_generator.poll_calls[0].provider == "fal"
+    assert emitter.sent_videos == []
+    assert [
+        text for text in emitter.sent_texts
+        if "couldn't generate a video" in text
+    ]
+    assert stored_jobs[0].status == "failed"
+    assert "Fal capacity exhausted" in (stored_jobs[0].failure_reason or "")

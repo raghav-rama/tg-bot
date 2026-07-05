@@ -31,28 +31,44 @@ class VideoProviderRouter:
         self,
         request: VideoGenerationRequest,
     ) -> SubmittedVideoJob:
-        if request.provider_hint in {"vertex", "runpod"}:
+        direct_hint = request.provider_hint in {"vertex", "runpod", "fal"}
+        if direct_hint:
             return await self._submit_to_provider(request, request.provider_hint)
 
         last_safety_error: ProviderSafetyError | None = None
         for provider_name in self.provider_order:
             if provider_name not in self.providers:
                 continue
+            if provider_name != "vertex" and last_safety_error is not None:
+                continue
             try:
                 return await self._submit_to_provider(request, provider_name)
             except ProviderSafetyError as exc:
                 last_safety_error = exc
+                runpod_allowed = (
+                    provider_name == "vertex"
+                    and "runpod" in self.provider_order
+                    and "runpod" in self.providers
+                )
                 self.logger.warning(
                     log_kv(
                         "video_provider_safety_rejection",
                         provider=provider_name,
-                        fallback_provider=self._next_configured_provider(provider_name),
+                        fallback_provider="runpod" if runpod_allowed else None,
                         model=self.provider_models.get(provider_name),
                     )
                 )
                 if provider_name != "vertex":
                     raise
-                continue
+                if not runpod_allowed:
+                    raise
+                try:
+                    return await self._submit_to_provider(request, "runpod")
+                except Exception:
+                    raise exc
+        if last_safety_error is not None:
+            raise last_safety_error
+        raise ProviderUpstreamError("No configured video provider is available")
 
         if last_safety_error is not None:
             raise last_safety_error

@@ -8,13 +8,15 @@ MessageType = Literal["text", "image", "command"]
 Role = Literal["user", "assistant"]
 ChatType = Literal["private", "group", "supergroup", "channel"]
 GenerationJobStatus = Literal["queued", "running", "completed", "failed"]
-VideoProviderName = Literal["vertex", "runpod"]
-VideoProviderHint = Literal["auto", "vertex", "runpod"]
+VideoProviderName = Literal["vertex", "runpod", "fal"]
+VideoProviderHint = Literal["auto", "vertex", "runpod", "fal"]
+FalVideoModelFamily = Literal["kling", "seedance", "gemini"]
 PreferenceType = Literal[
     "video",
     "video_provider",
     "video_duration",
     "video_orientation",
+    "fal_video_model",
     "runpod_pipeline",
     "runpod_quality",
     "runpod_seed",
@@ -210,6 +212,7 @@ class VideoGenerationRequest:
     num_inference_steps: int | None = None
     seed: int | None = None
     image_strength: float | None = None
+    resolution: str | None = None
     model_locked: bool = False
 
 
@@ -318,3 +321,5 @@ class ServiceReply:
     suppressed: bool = False
     usage_fields: dict[str, Any] = field(default_factory=dict)
     settings_menu: SettingsMenu | None = None
+    provider: str | None = None
+    model: str | None = None

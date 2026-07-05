@@ -13,6 +13,7 @@ Before making implementation decisions, read the local planning docs:
 - `docs/phase-1-5-draft-streaming.md` when working on Telegram partial-reply streaming
 - `docs/phase-2-vertex-image-generation.md` when working on generated image replies
 - `docs/phase-3-vertex-video-generation.md` when working on generated video replies
+- Phase 5 ElevenLabs TTS and Phase 6 Fal provider support are tracked in `docs/roadmap.md` until dedicated planning docs exist.
 
 Use `docs/roadmap.md` as the source of truth for:
 
@@ -20,11 +21,16 @@ Use `docs/roadmap.md` as the source of truth for:
 - whether a feature is current scope or planned scope
 - the exit criteria that define when the repo should move to the next phase
 
-The current repo plan is active Phase 4 Hardening and Expansion.
+The current repo plan has `Phase 5 - ElevenLabs Hindi Text To Speech` and `Phase 6 - Fal Video Provider Support` in progress in parallel isolated git worktrees; `Phase 4 - Hardening And Expansion` is accepted complete.
+
+Active worktrees:
+
+- Phase 5 TTS: `.worktrees/phase-5-elevenlabs-tts` on branch `phase-5-elevenlabs-tts`
+- Phase 6 Fal provider: `.worktrees/phase-6-fal-video-provider` on branch `phase-6-fal-video-provider`
 
 ## Current State
 
-As of `2026-06-06`, the repository is no longer docs-only. Phase 1, Phase 1.5, Phase 2, and Phase 3 are accepted as complete, and the roadmap is in Phase 4 hardening and expansion.
+As of `2026-06-18`, the repository is no longer docs-only. Phase 1, Phase 1.5, Phase 2, Phase 3, and Phase 4 are accepted as complete, and Phase 5 plus Phase 6 are in progress in parallel worktrees.
 
 - Phase 1 foundation code exists under `app/`.
 - Project metadata and dependency definitions exist in `pyproject.toml` and `uv.lock`.
@@ -36,12 +42,12 @@ As of `2026-06-06`, the repository is no longer docs-only. Phase 1, Phase 1.5, P
 - The `/image` provider now supports both Imagen models through Vertex `generate_images` and Gemini image models through Vertex `generate_content`; `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`.
 - Phase 3 code now exists for `/video <prompt>`, SQLite-backed generation jobs, an in-process polling worker, Vertex video generation through the Python `google-genai` SDK path, and Telegram video delivery.
 - Phase 4 video routing now supports Runpod-hosted LTX fallback: `/video <prompt>` uses Vertex first and falls back to Runpod only on classified Vertex safety/unsafe rejections, while `/video_ltx <prompt>` forces Runpod for manual testing.
-- Phase 4 now includes `/settings` inline-button presets for allowed users to tune video provider, video duration, video aspect/orientation, safe Runpod LTX options, image settings, and chat behavior per chat/user without exposing secrets or infrastructure settings.
+- Phase 4 now includes `/settings` inline-button presets for allowed users to tune video provider, video provider family (when multiple Fal families are configured), video duration, video aspect/orientation, safe Runpod LTX options, image settings, and chat behavior per chat/user without exposing secrets or infrastructure settings.
 - Runpod LTX requests use native LTX sizing controls (`width`, `height`, `num_frames`, and `frame_rate`) instead of Vertex-style `aspect_ratio`; safe Telegram settings can also send `pipeline`, two-stage `num_inference_steps`, `seed`, and reference `image_strength`, while storage, checkpoint, LoRA, offload, quantization, and compile controls remain environment-only.
 - Completed GCS-backed Runpod worker outputs are delivered by transient bot-side signed URLs while persisting only the durable `gs://` URI.
 - Video generation currently supports either inline provider-returned bytes or URI-backed output that can be fetched later when needed.
 - Telegram video delivery now uses a configurable request timeout and logs concrete delivery exceptions for easier debugging of slow or ambiguous uploads.
-- Phase 4 hardening has now started with a real webhook deployment path: webhook mode registers the Telegram webhook during startup, validates `X-Telegram-Bot-Api-Secret-Token`, and reports webhook misconfiguration through readiness.
+- Completed Phase 4 hardening includes a real webhook deployment path: webhook mode registers the Telegram webhook during startup, validates `X-Telegram-Bot-Api-Secret-Token`, and reports webhook misconfiguration through readiness.
 - Phase 4 now includes log-only observability for chat, `/image`, `/video`, `/video_ltx`, and video job delivery, with optional config-driven cost estimates that default to disabled.
 - Production logs can now use `APP_LOG_FORMAT=json` for parseable structured fields, while local logs default to readable text. Repeated still-running video poll state and successful low-level HTTP client requests no longer dominate INFO-level logs.
 - Phase 4 now supports reference-image generation from Telegram photo captions and text commands that reply to a Telegram photo: `/image <prompt>` uses Gemini image models only, while `/video <prompt>` and `/video_ltx <prompt>` queue image-to-video jobs.
@@ -52,7 +58,8 @@ As of `2026-06-06`, the repository is no longer docs-only. Phase 1, Phase 1.5, P
 - Generated images are sent through Telegram `sendPhoto`, while raw generated bytes are not persisted in SQLite.
 - Generated videos are sent through Telegram `sendVideo`, while raw generated bytes are not persisted in SQLite.
 - Live Vertex, Runpod, and Telegram verification for the `/image`, `/video`, and `/video_ltx` flows still depends on real environment variables and a manual runtime check.
-- Later hardening work such as quotas, moderation, and stronger in-app retention controls still belongs to Phase 4.
+- Per-user/per-chat quotas, video/image daily budget caps, prompt/reference-image moderation gates, and in-app provider-output URL retention/expiry handling were deferred out of completed Phase 4 and remain future work unless the roadmap changes.
+- Fal-hosted video provider support, including likely Kling 3 and Seedance 2 presets behind the existing queued `/video` path, is in progress for `Phase 6 - Fal Video Provider Support` in its own worktree and is not Phase 5 scope.
 
 ## Telegram Documentation
 

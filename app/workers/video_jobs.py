@@ -370,4 +370,6 @@ class VideoJobWorker:
     def _video_cost_for_provider(self, provider: str) -> float:
         if provider == "runpod":
             return self.settings.runpod_video_cost_per_second_usd
+        if provider == "fal":
+            return self.settings.fal_video_cost_per_second_usd
         return self.settings.vertex_video_cost_per_second_usd

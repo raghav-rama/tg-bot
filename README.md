@@ -4,12 +4,17 @@ Private Telegram bot built with FastAPI, SQLite, OpenAI chat, Vertex AI image/vi
 
 ## Status
 
-The repository has completed `Phase 3 - Vertex Video Generation` and is now aligned to `Phase 4 - Hardening And Expansion`.
+The repository has completed `Phase 4 - Hardening And Expansion`. `Phase 5 - ElevenLabs Hindi Text To Speech` and `Phase 6 - Fal Video Provider Support` are now in progress in parallel isolated git worktrees.
 
-Implemented today:
+Active worktrees:
+
+- Phase 5 TTS: `.worktrees/phase-5-elevenlabs-tts` on branch `phase-5-elevenlabs-tts`
+- Phase 6 Fal provider: `.worktrees/phase-6-fal-video-provider` on branch `phase-6-fal-video-provider`
+
+Implemented through Phase 4:
 
 - private, allowlisted Telegram bot
-- polling-first runtime plus a Phase 4 webhook mode that self-registers with Telegram
+- polling-first runtime plus webhook mode that self-registers with Telegram
 - SQLite-backed conversation memory and reset semantics
 - text chat and single-photo understanding through OpenAI
 - Telegram draft streaming for long-running text replies
@@ -133,9 +138,32 @@ VERTEX_API_KEY=your-vertex-api-key
 # VERTEX_IMAGE_COST_PER_IMAGE_USD=0
 # VERTEX_VIDEO_COST_PER_SECOND_USD=0
 
+# Optional Fal video provider for /video
+# FAL_API_KEY=your-fal-api-key
+# FAL_VIDEO_TEXT_TO_VIDEO_MODEL=fal-ai/google/gemini-omni-flash
+# FAL_VIDEO_IMAGE_TO_VIDEO_MODEL=fal-ai/google/gemini-omni-flash/image-to-video
+# FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL=fal-ai/google/gemini-omni-flash/reference-to-video
+# FAL_VIDEO_RESOLUTION=720p
+
 # Optional Runpod LTX fallback for /video and manual /video_ltx
-# VIDEO_PROVIDER_ORDER=vertex,runpod
 # RUNPOD_API_KEY=your-runpod-api-key
+# RUNPOD_VIDEO_ENDPOINT_ID=your-runpod-serverless-endpoint-id
+# RUNPOD_VIDEO_BASE_URL=https://api.runpod.ai/v2
+# RUNPOD_VIDEO_MODEL=ltx-2.3-22b-distilled-1.1
+# RUNPOD_VIDEO_WIDTH=576
+# RUNPOD_VIDEO_HEIGHT=1024
+# RUNPOD_VIDEO_DURATION_SECONDS=4
+# RUNPOD_VIDEO_FRAME_RATE=24
+# RUNPOD_VIDEO_EXECUTION_TIMEOUT_MS=1800000
+# RUNPOD_VIDEO_TTL_MS=7200000
+# RUNPOD_VIDEO_REFERENCE_IMAGE_MAX_BYTES=6000000
+# RUNPOD_VIDEO_SIGNED_URL_TTL_SECONDS=3600
+# RUNPOD_VIDEO_COST_PER_SECOND_USD=0
+
+# Example video provider order. Default is "vertex,runpod".
+# Add "fal" only when FAL_API_KEY is configured, e.g.:
+# VIDEO_PROVIDER_ORDER=vertex,runpod,fal
+# VERTEX_VIDEO_ASPECT_RATIO=9:16
 # RUNPOD_VIDEO_ENDPOINT_ID=your-runpod-serverless-endpoint-id
 # RUNPOD_VIDEO_BASE_URL=https://api.runpod.ai/v2
 # RUNPOD_VIDEO_MODEL=ltx-2.3-22b-distilled-1.1
@@ -221,6 +249,26 @@ Vertex video settings:
 - `TELEGRAM_VIDEO_REQUEST_TIMEOUT_SECONDS`
 - `VIDEO_JOB_POLL_INTERVAL_SECONDS`
 - `VERTEX_VIDEO_COST_PER_SECOND_USD`: optional log-only estimate rate, default `0`
+
+Fal video settings:
+
+- `FAL_API_KEY`: required to enable Fal video generation
+- `FAL_VIDEO_BASE_URL`: default `https://queue.fal.run`
+- `FAL_VIDEO_MODEL`: default text-to-video endpoint, default `fal-ai/kling-video/v3/standard/text-to-video`
+- `FAL_VIDEO_TEXT_TO_VIDEO_MODEL`: optional override for the text-to-video endpoint; if set, it takes precedence over `FAL_VIDEO_MODEL`
+- `FAL_VIDEO_IMAGE_TO_VIDEO_MODEL`: optional image-to-video endpoint (e.g. `fal-ai/kling-video/v3/standard/image-to-video`)
+- `FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL`: optional reference-to-video endpoint (e.g. `bytedance/seedance-2.0/reference-to-video`)
+- `FAL_VIDEO_EDIT_MODEL`: optional video-to-video endpoint (requires future video-input support)
+- `FAL_VIDEO_RESOLUTION`: Seedance resolution preset, default `720p`
+- `FAL_VIDEO_REFERENCE_IMAGE_MAX_BYTES`: default `6000000`
+- `FAL_VIDEO_COST_PER_SECOND_USD`: optional log-only estimate rate, default `0`
+- `FAL_VIDEO_SUBMIT_TIMEOUT_SECONDS`: HTTP timeout for submit/status calls, default `45`
+
+Supported Fal model families include Kling (`fal-ai/kling-video`), Seedance 2.0 (`bytedance/seedance-2.0`), and Gemini Omni Flash (`google/gemini-omni-flash`). The bot infers which families are available from the configured endpoints. When more than one family is available, the `/settings` menu shows a **Fal model** option so users can pick Kling, Seedance, or Gemini per chat. The chosen family is then mapped to the right mode-specific endpoint:
+
+- text-only `/video` uses `FAL_VIDEO_TEXT_TO_VIDEO_MODEL` or `FAL_VIDEO_MODEL`
+- `/video` with a reference photo looks for a matching-family reference-to-video endpoint, then image-to-video, then falls back to the text-to-video endpoint for that family
+- unsupported aspect ratios for Gemini are coerced to `9:16`
 
 Runpod video settings:
 
@@ -317,7 +365,7 @@ SQLITE_PATH=/app/volume/data/bot.db
 - `/reset`: archive the current conversation and start a fresh one
 - `/settings`: choose per-chat/per-user video, image, and chat settings with inline buttons
 - `/image <prompt>`: generate one image through Vertex AI
-- `/video <prompt>`: queue one short video through Vertex AI, with Runpod fallback only on Vertex safety rejections
+- `/video <prompt>`: queue one short video through the configured providers (Vertex, Runpod, or Fal), with Runpod fallback only on Vertex safety rejections
 - `/video_ltx <prompt>`: queue one short video directly through Runpod LTX
 
 Reference-image commands:
@@ -369,4 +417,5 @@ uv.lock
 ## Notes For Future Work
 
 - distributed workers and external job queues are out of scope today
-- richer observability, quotas, and stronger in-app retention controls remain Phase 4 work
+- per-user/per-chat quotas, daily media budget caps, prompt/reference-image moderation gates, and in-app provider-output URL retention/expiry handling were deferred out of completed Phase 4 and remain future work unless the roadmap changes
+- Fal-hosted video provider support is in progress for `Phase 6 - Fal Video Provider Support` in a separate worktree from `Phase 5 - ElevenLabs Hindi Text To Speech`, as an expansion of the existing queued `/video` provider path with likely Kling 3 and Seedance 2 presets

@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, TypeVar
 
+from app.config import Settings as _Settings
 from app.domain.models import (
+    FalVideoModelFamily,
     PreferenceType,
     SettingsButton,
     SettingsMenu,
@@ -72,6 +74,13 @@ class RunpodReferenceStrengthPreset:
 
 
 @dataclass(frozen=True, slots=True)
+class FalVideoModelPreset:
+    id: FalVideoModelFamily
+    label: str
+    family: FalVideoModelFamily
+
+
+@dataclass(frozen=True, slots=True)
 class ImagePreset:
     id: str
     label: str
@@ -104,6 +113,11 @@ VIDEO_PROVIDER_PRESETS: dict[str, VideoProviderPreset] = {
         id="runpod",
         label="🚀 Runpod LTX",
         provider_hint="runpod",
+    ),
+    "fal": VideoProviderPreset(
+        id="fal",
+        label="🌌 Fal",
+        provider_hint="fal",
     ),
 }
 
@@ -280,10 +294,17 @@ CHAT_PRESETS: dict[str, ChatPreset] = {
     ),
 }
 
+_FAL_FAMILY_LABELS: dict[FalVideoModelFamily, str] = {
+    "kling": "🎬 Kling",
+    "seedance": "🌌 Seedance",
+    "gemini": "✨ Gemini",
+}
+
 SETTABLE_PREFERENCE_TYPES: tuple[PreferenceType, ...] = (
     "video_provider",
     "video_duration",
     "video_orientation",
+    "fal_video_model",
     "runpod_pipeline",
     "runpod_quality",
     "runpod_seed",
@@ -324,6 +345,26 @@ def runpod_reference_strength_preset_for(
     return _preset_or_none(RUNPOD_REFERENCE_STRENGTH_PRESETS, preset_id)
 
 
+def fal_video_model_preset_for(
+    preset_id: str | None,
+    *,
+    settings: _Settings | None = None,
+) -> FalVideoModelPreset | None:
+    return _preset_or_none(fal_video_model_presets_for(settings or _Settings()), preset_id)
+
+
+def fal_video_model_presets_for(settings: _Settings) -> dict[str, FalVideoModelPreset]:
+    families = sorted(settings.fal_video_available_families)
+    return {
+        family: FalVideoModelPreset(
+            id=family,
+            label=_FAL_FAMILY_LABELS[family],
+            family=family,
+        )
+        for family in families
+    }
+
+
 def image_preset_for(preset_id: str | None) -> ImagePreset | None:
     return _preset_or_none(IMAGE_PRESETS, preset_id)
 
@@ -335,16 +376,21 @@ def chat_preset_for(preset_id: str | None) -> ChatPreset | None:
 def preset_for_preference(
     preference_type: PreferenceType,
     preset_id: str | None,
+    *,
+    settings: _Settings | None = None,
 ) -> object | None:
     if preference_type not in SETTABLE_PREFERENCE_TYPES:
         return None
-    return _preset_or_none(_preset_map_for(preference_type), preset_id)
+    return _preset_or_none(_preset_map_for(preference_type, settings=settings), preset_id)
 
 
 def settings_menu_for(
     preference_type: PreferenceType | None = None,
     active_preset_id: str | None = None,
+    *,
+    settings: _Settings | None = None,
 ) -> SettingsMenu:
+    resolved_settings = settings or _Settings()
     if preference_type is None:
         return SettingsMenu(
             rows=(
@@ -357,11 +403,19 @@ def settings_menu_for(
         )
 
     if preference_type == "video":
-        return SettingsMenu(
-            rows=(
-                (SettingsButton("🧭 Provider", "prefs:menu:video_provider"),),
-                (SettingsButton("⏱️ Duration", "prefs:menu:video_duration"),),
-                (SettingsButton("📐 Aspect ratio", "prefs:menu:video_orientation"),),
+        rows = [
+            (SettingsButton("🧭 Provider", "prefs:menu:video_provider"),),
+            (SettingsButton("⏱️ Duration", "prefs:menu:video_duration"),),
+            (SettingsButton("📐 Aspect ratio", "prefs:menu:video_orientation"),),
+        ]
+        if resolved_settings.fal_video_generation_enabled:
+            fal_families = resolved_settings.fal_video_available_families
+            if len(fal_families) > 1:
+                rows.append(
+                    (SettingsButton("🤖 Fal model", "prefs:menu:fal_video_model"),)
+                )
+        rows.extend(
+            [
                 (SettingsButton("🧬 Runpod pipeline", "prefs:menu:runpod_pipeline"),),
                 (SettingsButton("🎚️ Runpod quality", "prefs:menu:runpod_quality"),),
                 (SettingsButton("🎲 Runpod seed", "prefs:menu:runpod_seed"),),
@@ -372,10 +426,11 @@ def settings_menu_for(
                     ),
                 ),
                 (SettingsButton("↩️ Back", "prefs:menu:main"),),
-            )
+            ]
         )
+        return SettingsMenu(rows=tuple(rows))
 
-    preset_map = _preset_map_for(preference_type)
+    preset_map = _preset_map_for(preference_type, settings=resolved_settings)
     rows: list[tuple[SettingsButton, ...]] = []
     for preset_id, preset in preset_map.items():
         marker = "✅ " if preset_id == active_preset_id else ""
@@ -389,7 +444,7 @@ def settings_menu_for(
         )
     back_callback_data = (
         "prefs:menu:video"
-        if preference_type.startswith(("video_", "runpod_"))
+        if preference_type.startswith(("video_", "runpod_", "fal_video_"))
         else "prefs:menu:main"
     )
     rows.append((SettingsButton("↩️ Back", back_callback_data),))
@@ -398,6 +453,8 @@ def settings_menu_for(
 
 def parse_settings_callback(
     callback_data: str | None,
+    *,
+    settings: _Settings | None = None,
 ) -> tuple[str, PreferenceType | None, str | None] | None:
     if callback_data is None:
         return None
@@ -411,7 +468,7 @@ def parse_settings_callback(
             return None
         return ("menu", None if value == "main" else value, None)
     if action in SETTABLE_PREFERENCE_TYPES:
-        if value in _preset_map_for(action):
+        if value in _preset_map_for(action, settings=settings or _Settings()):
             return ("set", action, value)
     return None
 
@@ -419,40 +476,55 @@ def parse_settings_callback(
 def active_settings_summary(
     *,
     preferences: Mapping[str, UserPreference | None],
+    settings: _Settings | None = None,
 ) -> str:
+    resolved_settings = settings or _Settings()
     return (
         "Settings\n"
-        f"- Video provider: {_label_for_preference('video_provider', preferences.get('video_provider'))}\n"
-        f"- Video duration: {_label_for_preference('video_duration', preferences.get('video_duration'))}\n"
-        f"- Video aspect ratio: {_label_for_preference('video_orientation', preferences.get('video_orientation'))}\n"
-        f"- Runpod pipeline: {_label_for_preference('runpod_pipeline', preferences.get('runpod_pipeline'))}\n"
-        f"- Runpod quality: {_label_for_preference('runpod_quality', preferences.get('runpod_quality'))}\n"
-        f"- Runpod seed: {_label_for_preference('runpod_seed', preferences.get('runpod_seed'))}\n"
-        f"- Reference strength: {_label_for_preference('runpod_reference_strength', preferences.get('runpod_reference_strength'))}\n"
-        f"- Image: {_label_for_preference('image', preferences.get('image'))}\n"
-        f"- Chat: {_label_for_preference('chat', preferences.get('chat'))}"
+        f"- Video provider: {_label_for_preference('video_provider', preferences.get('video_provider'), settings=resolved_settings)}\n"
+        f"- Video duration: {_label_for_preference('video_duration', preferences.get('video_duration'), settings=resolved_settings)}\n"
+        f"- Video aspect ratio: {_label_for_preference('video_orientation', preferences.get('video_orientation'), settings=resolved_settings)}\n"
+        f"- Fal model: {_label_for_preference('fal_video_model', preferences.get('fal_video_model'), settings=resolved_settings)}\n"
+        f"- Runpod pipeline: {_label_for_preference('runpod_pipeline', preferences.get('runpod_pipeline'), settings=resolved_settings)}\n"
+        f"- Runpod quality: {_label_for_preference('runpod_quality', preferences.get('runpod_quality'), settings=resolved_settings)}\n"
+        f"- Runpod seed: {_label_for_preference('runpod_seed', preferences.get('runpod_seed'), settings=resolved_settings)}\n"
+        f"- Reference strength: {_label_for_preference('runpod_reference_strength', preferences.get('runpod_reference_strength'), settings=resolved_settings)}\n"
+        f"- Image: {_label_for_preference('image', preferences.get('image'), settings=resolved_settings)}\n"
+        f"- Chat: {_label_for_preference('chat', preferences.get('chat'), settings=resolved_settings)}"
     )
 
 
 def _label_for_preference(
     preference_type: PreferenceType,
     preference: UserPreference | None,
+    *,
+    settings: _Settings | None = None,
 ) -> str:
     if preference is None:
         return "Environment default"
-    preset = preset_for_preference(preference_type, preference.preset_id)
+    preset = preset_for_preference(
+        preference_type,
+        preference.preset_id,
+        settings=settings or _Settings(),
+    )
     if preset is None:
         return "Environment default"
     return preset.label
 
 
-def _preset_map_for(preference_type: PreferenceType) -> Mapping[str, object]:
+def _preset_map_for(
+    preference_type: PreferenceType,
+    *,
+    settings: _Settings | None = None,
+) -> Mapping[str, object]:
     if preference_type == "video_provider":
         return VIDEO_PROVIDER_PRESETS
     if preference_type == "video_duration":
         return VIDEO_DURATION_PRESETS
     if preference_type == "video_orientation":
         return VIDEO_ORIENTATION_PRESETS
+    if preference_type == "fal_video_model":
+        return fal_video_model_presets_for(settings or _Settings())
     if preference_type == "runpod_pipeline":
         return RUNPOD_PIPELINE_PRESETS
     if preference_type == "runpod_quality":

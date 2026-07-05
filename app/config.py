@@ -10,6 +10,25 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.providers.vertex_image_models import requires_global_location
 
+
+class _FalModelFamilyHelper:
+    """Helpers for mapping a concrete Fal endpoint to a family label."""
+
+    @staticmethod
+    def from_model(model: str) -> str:
+        lower = model.lower()
+        if "kling" in lower:
+            return "kling"
+        if "seedance" in lower:
+            return "seedance"
+        if "gemini" in lower or "google" in lower:
+            return "gemini"
+        return "other"
+
+
+def _fal_family_for_model(model: str) -> str:
+    return _FalModelFamilyHelper.from_model(model)
+
 DEFAULT_SYSTEM_PROMPT = (
     "You are a concise assistant for a YouTube channel workflow. "
     "Help brainstorm content ideas, titles, hooks, and clear answers. "
@@ -118,7 +137,7 @@ class Settings(BaseSettings):
         alias="VERTEX_VIDEO_MODEL",
     )
     vertex_video_aspect_ratio: str = Field(
-        default="16:9",
+        default="9:16",
         alias="VERTEX_VIDEO_ASPECT_RATIO",
     )
     vertex_video_duration_seconds: int | None = Field(
@@ -179,6 +198,47 @@ class Settings(BaseSettings):
     runpod_video_cost_per_second_usd: float = Field(
         default=0.0,
         alias="RUNPOD_VIDEO_COST_PER_SECOND_USD",
+    )
+    fal_api_key: SecretStr | None = Field(default=None, alias="FAL_API_KEY")
+    fal_video_base_url: str = Field(
+        default="https://queue.fal.run",
+        alias="FAL_VIDEO_BASE_URL",
+    )
+    fal_video_model: str = Field(
+        default="fal-ai/kling-video/v3/standard/text-to-video",
+        alias="FAL_VIDEO_MODEL",
+    )
+    fal_video_text_to_video_model: str | None = Field(
+        default=None,
+        alias="FAL_VIDEO_TEXT_TO_VIDEO_MODEL",
+    )
+    fal_video_image_to_video_model: str | None = Field(
+        default=None,
+        alias="FAL_VIDEO_IMAGE_TO_VIDEO_MODEL",
+    )
+    fal_video_reference_to_video_model: str | None = Field(
+        default=None,
+        alias="FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL",
+    )
+    fal_video_edit_model: str | None = Field(
+        default=None,
+        alias="FAL_VIDEO_EDIT_MODEL",
+    )
+    fal_video_resolution: str = Field(
+        default="720p",
+        alias="FAL_VIDEO_RESOLUTION",
+    )
+    fal_video_reference_image_max_bytes: int = Field(
+        default=6_000_000,
+        alias="FAL_VIDEO_REFERENCE_IMAGE_MAX_BYTES",
+    )
+    fal_video_cost_per_second_usd: float = Field(
+        default=0.0,
+        alias="FAL_VIDEO_COST_PER_SECOND_USD",
+    )
+    fal_video_submit_timeout_seconds: int = Field(
+        default=45,
+        alias="FAL_VIDEO_SUBMIT_TIMEOUT_SECONDS",
     )
     bot_video_max_bytes: int = Field(
         default=50 * 1024 * 1024,
@@ -248,6 +308,12 @@ class Settings(BaseSettings):
         "runpod_video_endpoint_id",
         "runpod_video_base_url",
         "runpod_video_model",
+        "fal_video_base_url",
+        "fal_video_model",
+        "fal_video_image_to_video_model",
+        "fal_video_reference_to_video_model",
+        "fal_video_edit_model",
+        "fal_video_resolution",
         mode="before",
     )
     @classmethod
@@ -257,7 +323,7 @@ class Settings(BaseSettings):
         normalized = value.strip()
         return normalized or None
 
-    @field_validator("telegram_webhook_secret_token", "runpod_api_key", mode="before")
+    @field_validator("telegram_webhook_secret_token", "runpod_api_key", "fal_api_key", mode="before")
     @classmethod
     def normalize_optional_secret(
         cls,
@@ -312,7 +378,7 @@ class Settings(BaseSettings):
             providers = tuple(
                 str(part).strip().lower() for part in value if str(part).strip()
             )
-        allowed = {"vertex", "runpod"}
+        allowed = {"vertex", "runpod", "fal"}
         if not providers:
             raise ValueError("VIDEO_PROVIDER_ORDER must include at least one provider")
         unknown = sorted(set(providers) - allowed)
@@ -346,6 +412,13 @@ class Settings(BaseSettings):
             raise ValueError("video settings must be greater than zero")
         return value
 
+    @field_validator("fal_video_reference_image_max_bytes", "fal_video_submit_timeout_seconds")
+    @classmethod
+    def validate_fal_positive_ints(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("Fal video settings must be greater than zero")
+        return value
+
     @field_validator("runpod_video_width")
     @classmethod
     def validate_runpod_video_width(cls, value: int) -> int:
@@ -373,6 +446,7 @@ class Settings(BaseSettings):
         "vertex_image_cost_per_image_usd",
         "vertex_video_cost_per_second_usd",
         "runpod_video_cost_per_second_usd",
+        "fal_video_cost_per_second_usd",
     )
     @classmethod
     def validate_non_negative_floats(cls, value: float) -> float:
@@ -420,6 +494,14 @@ class Settings(BaseSettings):
             self.runpod_video_duration_seconds = self.vertex_video_duration_seconds
         return self
 
+    @model_validator(mode="after")
+    def validate_fal_video_settings(self) -> Settings:
+        if "fal" in self.video_provider_order and self.fal_api_key is None:
+            raise ValueError(
+                "FAL_API_KEY is required when VIDEO_PROVIDER_ORDER includes 'fal'"
+            )
+        return self
+
     @property
     def allowed_user_ids(self) -> set[int]:
         return {int(part) for part in self.telegram_allowed_user_ids.split(",") if part}
@@ -437,9 +519,70 @@ class Settings(BaseSettings):
         return self.runpod_api_key is not None and self.runpod_video_endpoint_id is not None
 
     @property
+    def fal_video_generation_enabled(self) -> bool:
+        return self.fal_api_key is not None
+
+    @property
+    def fal_video_available_families(self) -> set[str]:
+        """Families detected from all configured Fal mode endpoints."""
+        families: set[str] = set()
+        for model in (
+            self.fal_video_text_to_video_model or self.fal_video_model,
+            self.fal_video_image_to_video_model,
+            self.fal_video_reference_to_video_model,
+        ):
+            if model:
+                families.add(_fal_family_for_model(model))
+        return families
+
+    @property
+    def fal_video_default_family(self) -> str:
+        """Infer the default family from the configured text-to-video endpoint."""
+        text_model = self.fal_video_text_to_video_model or self.fal_video_model
+        family = _fal_family_for_model(text_model)
+        available = self.fal_video_available_families
+        if family in available:
+            return family
+        return next(iter(available), "kling")
+
+    def fal_video_model_for_mode(
+        self,
+        family: str,
+        *,
+        has_reference_image: bool = False,
+    ) -> str:
+        """Return the concrete Fal endpoint for a family and input mode."""
+        family = family.lower()
+        candidates: list[str | None] = []
+
+        if has_reference_image:
+            candidates.extend(
+                [
+                    self.fal_video_reference_to_video_model,
+                    self.fal_video_image_to_video_model,
+                ]
+            )
+
+        candidates.extend(
+            [
+                self.fal_video_text_to_video_model,
+                self.fal_video_model,
+            ]
+        )
+
+        for candidate in candidates:
+            if candidate and _fal_family_for_model(candidate) == family:
+                return candidate
+
+        # Last resort: fallback to the default text-to-video endpoint even if the
+        # family does not match, so the request is still submitted.
+        return self.fal_video_text_to_video_model or self.fal_video_model
+
+    @property
     def video_generation_enabled(self) -> bool:
         enabled_by_provider = {
             "vertex": self.vertex_video_generation_enabled,
             "runpod": self.runpod_video_generation_enabled,
+            "fal": self.fal_video_generation_enabled,
         }
         return any(enabled_by_provider[provider] for provider in self.video_provider_order)

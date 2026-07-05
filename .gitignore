@@ -1,6 +1,7 @@
 .pytest_cache/
 __pycache__/
 .venv/
+.worktrees/
 data/
 *.egg-info/
 .env
@@ -8,3 +9,4 @@ data/
 .envrc
 service-account.json
 .DS_Store
+.omo/

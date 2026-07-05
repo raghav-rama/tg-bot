@@ -4,9 +4,11 @@ from datetime import datetime, timezone
 
 import pytest
 
+from app.config import Settings
 from app.domain.models import UserPreference
 from app.domain.preferences import (
     active_settings_summary,
+    fal_video_model_presets_for,
     image_preset_for,
     runpod_pipeline_preset_for,
     runpod_quality_preset_for,
@@ -16,6 +18,7 @@ from app.domain.preferences import (
     video_provider_preset_for,
 )
 from app.storage.preferences import PreferenceRepository
+
 
 
 def _utcnow() -> datetime:
@@ -61,11 +64,18 @@ async def test_preference_repository_upserts_per_chat_user(service_bundle) -> No
 
 
 def test_settings_menu_uses_compact_callback_data() -> None:
-    main_menu = settings_menu_for()
-    menu = settings_menu_for(preference_type="video")
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+    )
+    main_menu = settings_menu_for(settings=settings)
+    menu = settings_menu_for(preference_type="video", settings=settings)
     duration_menu = settings_menu_for(
         preference_type="video_duration",
         active_preset_id="duration_6s",
+        settings=settings,
     )
 
     video_menu_callback_data = [
@@ -131,6 +141,16 @@ def test_presets_map_to_request_overrides() -> None:
     assert image_preset.output_mime_type == "image/jpeg"
 
 
+def test_video_provider_preset_includes_fal() -> None:
+    fal_preset = video_provider_preset_for("fal")
+    auto_preset = video_provider_preset_for("auto")
+
+    assert fal_preset is not None
+    assert fal_preset.provider_hint == "fal"
+    assert "Fal" in fal_preset.label
+    assert auto_preset.provider_hint == "auto"
+
+
 def test_image_settings_menu_has_clear_gemini_portrait_option() -> None:
     menu = settings_menu_for(preference_type="image")
     labels = [button.text for row in menu.rows for button in row]
@@ -164,7 +184,84 @@ def test_settings_presets_use_emoji_labels() -> None:
         assert all(ord(label[0]) > 127 for label in labels)
 
 
-def test_active_settings_summary_names_defaults_and_saved_presets() -> None:
+def test_video_menu_shows_fal_model_button_when_multiple_families() -> None:
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        FAL_API_KEY="test-fal-key",
+        FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/kling-video/v3/standard/text-to-video",
+        FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL="bytedance/seedance-2.0/reference-to-video",
+    )
+
+    menu = settings_menu_for(preference_type="video", settings=settings)
+    labels = [button.text for row in menu.rows for button in row]
+
+    assert "🤖 Fal model" in labels
+    assert "prefs:menu:fal_video_model" in [
+        button.callback_data for row in menu.rows for button in row
+    ]
+
+
+def test_video_menu_hides_fal_model_button_for_single_family() -> None:
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        FAL_API_KEY="test-fal-key",
+        FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/kling-video/v3/standard/text-to-video",
+    )
+
+    menu = settings_menu_for(preference_type="video", settings=settings)
+    labels = [button.text for row in menu.rows for button in row]
+
+    assert "🤖 Fal model" not in labels
+
+
+def test_fal_video_model_presets_match_configured_families() -> None:
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        FAL_API_KEY="test-fal-key",
+        FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/google/gemini-omni-flash",
+        FAL_VIDEO_IMAGE_TO_VIDEO_MODEL="fal-ai/kling-video/v3/standard/image-to-video",
+    )
+
+    presets = fal_video_model_presets_for(settings)
+
+    assert set(presets.keys()) == {"gemini", "kling"}
+    assert presets["gemini"].label == "✨ Gemini"
+    assert presets["kling"].label == "🎬 Kling"
+
+
+def test_active_settings_summary_includes_fal_model() -> None:
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        FAL_API_KEY="test-fal-key",
+        FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/google/gemini-omni-flash",
+    )
+    summary = active_settings_summary(
+        preferences={
+            "fal_video_model": UserPreference(
+                chat_id=100,
+                user_id=42,
+                preference_type="fal_video_model",
+                preset_id="gemini",
+                updated_at=_utcnow(),
+            )
+        },
+        settings=settings,
+    )
+
+    assert "Fal model: ✨ Gemini" in summary
+
     summary = active_settings_summary(
         preferences={
             "video": UserPreference(

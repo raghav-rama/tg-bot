@@ -9,18 +9,27 @@ This document separates the current repo state from the planned delivery phases.
 - `phase-2-vertex-image-generation.md` defines the completed Phase 2 image-generation work only.
 - `phase-3-vertex-video-generation.md` defines the completed Phase 3 video-generation work only.
 - Phase 5 ElevenLabs Hindi text-to-speech is tracked in this roadmap until it has a dedicated planning doc.
+- Phase 6 Fal provider support is tracked in this roadmap until it has a dedicated planning doc.
 - This roadmap tracks the broader direction, especially the later hardening and expansion work.
 
 ## Current Phase
 
-- Active phase: `Phase 4 - Hardening And Expansion`
+- Active phases:
+  - `Phase 5 - ElevenLabs Hindi Text To Speech`
+  - `Phase 6 - Fal Video Provider Support`
 - Status: `in_progress`
-- Last updated: `2026-06-06`
-- Previous phase accepted: `Phase 3 - Vertex Video Generation`
+- Updated: `2026-07-05`
+- Previous phase accepted: `Phase 4 - Hardening And Expansion`
+- Parallel implementation worktrees:
+  - Phase 5 branch: `phase-5-elevenlabs-tts`
+  - Phase 5 path: `.worktrees/phase-5-elevenlabs-tts`
+  - Phase 6 branch: `phase-6-fal-video-provider`
+  - Phase 6 path: `.worktrees/phase-6-fal-video-provider`
 - Evidence:
   - Phase 1 foundation work is accepted as complete for repo sequencing
   - Phase 1.5 draft streaming is accepted as complete and no longer blocks the next milestone
   - Phase 2 image generation is accepted as complete for repo sequencing
+  - Phase 3 video generation is accepted as complete for repo sequencing
   - an explicit `/video` command path now exists alongside the existing OpenAI chat and `/image` flows
   - video generation now uses persisted `generation_jobs` rows plus a background polling worker instead of blocking the original request path
   - completed video jobs now deliver through Telegram `sendVideo`
@@ -29,10 +38,14 @@ This document separates the current repo state from the planned delivery phases.
   - Phase 4 now supports Telegram photo captions that start with `/image`, `/video`, or `/video_ltx`, and text commands that reply to a Telegram photo, as reference-image generation commands
   - Phase 4 now has a provider-neutral video router: `/video` tries Vertex first and falls back to Runpod LTX only on classified Vertex safety rejections, while `/video_ltx` forces Runpod for manual testing
   - Phase 4 now includes `/settings` inline-button presets stored per chat and user for safe video provider, video duration, video aspect/orientation, Runpod LTX, image, and chat request tuning
+  - the remaining quota, budget-cap, moderation-gate, and in-app provider-output URL retention/expiry items are explicitly deferred out of Phase 4
+  - the optional provider strategy review is represented by active Phase 6 Fal provider support
+  - Phase 5 and Phase 6 implementation worktrees were created from `dev` after the `.worktrees/` ignore-rule commit
+  - both Phase 5 and Phase 6 worktrees passed baseline `uv run pytest` with `133` tests passing
 
 ## Current State
 
-As of `2026-06-06`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, the completed Phase 3 video-generation slice, and active Phase 4 hardening work.
+As of `2026-06-18`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, the completed Phase 3 video-generation slice, and the completed Phase 4 hardening and expansion work. Phase 5 ElevenLabs Hindi text-to-speech and Phase 6 Fal video provider support are in progress in parallel isolated git worktrees.
 
 - Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, OpenAI chat, Vertex image plus video generation, and Runpod LTX video fallback.
 - A polling-first runtime exists, and webhook mode now reuses the same shared processing path when enabled.
@@ -48,10 +61,14 @@ As of `2026-06-06`, this repository contains the completed Phase 1 foundation, t
 - Runpod GCS-backed outputs are downloaded through transient bot-side signed URLs while storing only durable `gs://` output URIs.
 - An in-process polling worker now checks pending video jobs and delivers completed assets through Telegram `sendVideo`.
 - Video job persistence stores operation state, output URIs, failure reasons, and Telegram delivery metadata without persisting raw video bytes in SQLite.
-- Tests exist under `tests/` for health and readiness behavior, normalization, reply-to-photo reference commands, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, supersession, Telegram formatting, image generation, video job submission, worker completion, worker failure handling, Vertex video, Runpod video, and provider routing.
-- Real Vertex, Runpod, and Telegram verification still depends on configured credentials and a manual runtime check.
+- Tests exist under `tests/` for health and readiness behavior, normalization, reply-to-photo reference commands, allowlist handling, memory reuse, reset semantics, draft streaming, draft fallback, supersession, Telegram formatting, image generation, video job submission, worker completion, worker failure handling, Vertex video, Runpod video, Fal video, provider routing, and settings provider exposure.
+- Phase 6 now has a `FalVideoProvider` adapter behind the existing `VideoGenerator` interface, using the Fal queue REST API (`https://queue.fal.run/{model_id}`) with submit, status, and result polling.
+- Phase 6 supports Fal-hosted Kling, Seedance 2.0, and Gemini Omni Flash endpoints for text-to-video, image-to-video, and reference-to-video modes by inferring the model family and mode from the configured endpoint path.
+- Reference images are sent to Fal as base64 data URIs using the correct parameter name per model family (`start_image_url` for Kling, `image_url` for Seedance/Gemini, `image_urls` for reference-to-video).
+- Phase 6 exposes `"fal"` as a selectable video provider in `/settings`; exact model endpoints remain environment-only.
+- Real Vertex, Runpod, Fal, and Telegram verification still depends on configured credentials and a manual runtime check.
 - Inline generated video bytes remain transient in memory only, while URI-backed assets are expected to live in a bucket with lifecycle cleanup managed outside the app.
-- Phase 4 has started with a real webhook deployment path: webhook mode now registers the Telegram webhook on startup, validates the `X-Telegram-Bot-Api-Secret-Token` header on inbound requests, and reports webhook setup state through readiness.
+- Phase 4 includes a real webhook deployment path: webhook mode now registers the Telegram webhook on startup, validates the `X-Telegram-Bot-Api-Secret-Token` header on inbound requests, and reports webhook setup state through readiness.
 - Phase 4 now logs usage units and optional best-effort cost estimates for OpenAI chat, Vertex image generation, Vertex/Runpod video submission, and completed video delivery without adding a metrics backend or billing reconciliation.
 - Phase 4 now supports `APP_LOG_FORMAT=json` for production structured logs, keeps readable text logs as the local default, suppresses successful low-level HTTP client logs below `WARNING`, and keeps repeated still-running video poll state at `DEBUG`.
 - Photo captions that start with `/image <prompt>`, or text `/image <prompt>` commands that reply to a Telegram photo, use that photo as a transient reference image for Gemini image generation; Imagen remains prompt-to-image only.
@@ -69,6 +86,9 @@ Build this in order:
 4. Add generated video output only after image generation works.
 5. Harden the deployed bot before adding text-to-speech output.
 6. Add Hindi text-to-speech as a dedicated `/tts` command after Phase 4.
+7. Add Fal video provider support as a provider expansion of the existing `/video` job path.
+
+Phase 5 and Phase 6 are currently being implemented in parallel through isolated git worktrees because they touch separate provider surfaces: Phase 5 adds a new TTS command/provider path, while Phase 6 expands the existing queued video provider path.
 
 This ordering keeps the first milestone small, then improves reply UX before introducing richer media.
 
@@ -233,20 +253,17 @@ Phase 3 is done when:
 
 ## Phase 4 - Hardening And Expansion
 
-Status: `in_progress`
+Status: `complete`
 
 After the foundation and media-generation phases work, the next layer is operational hardening.
 
 - webhook deployment path
 - richer observability and cost tracking
-- rate limits and per-user quotas
-- moderation and safety controls for generated media
-- stronger asset retention and cleanup policies
 - optional provider strategy review if OpenAI chat plus Vertex media becomes hard to operate
 - /image and /video command accept a reference image for generating content (gemini models eg: gemini-3-pro-image-preview)
 - Runpod LTX fallback for Vertex video safety false positives, with `/video_ltx` as the manual test path
 
-Current Phase 4 progress:
+Completed Phase 4 scope:
 
 - webhook mode now self-registers against Telegram with `setWebhook`
 - webhook mode now requires and validates a Telegram secret token header
@@ -260,9 +277,28 @@ Current Phase 4 progress:
 - `/video_ltx` now forces Runpod LTX and persists queued jobs with the Runpod provider
 - `/settings` now exposes inline-button presets for video provider, video duration, video aspect/orientation, safe Runpod LTX, image, and chat request settings while keeping secrets and infrastructure settings environment-only
 
+Deferred out of Phase 4:
+
+- per-user or per-chat quotas
+- video or image daily budget caps
+- prompt or reference-image moderation gates
+- in-app retention or expiry handling for provider output URLs
+
+These are not required before moving past Phase 4. The current asset rule remains that generated bytes and signed URLs are transient, while URI-backed assets rely on provider, bucket, or object-storage lifecycle policy outside the app.
+
+Completion note:
+
+- The optional provider strategy review is satisfied for sequencing by active Phase 6 Fal provider support, which will add Fal-hosted video models behind the existing provider interface instead of changing Phase 4 runtime behavior.
+
 ## Phase 5 - ElevenLabs Hindi Text To Speech
 
-Status: `planned`
+Status: `in_progress`
+
+Implementation worktree:
+
+- branch: `phase-5-elevenlabs-tts`
+- path: `.worktrees/phase-5-elevenlabs-tts`
+- baseline verification: `uv run pytest` passed with `133` tests
 
 ### Goal
 
@@ -306,6 +342,65 @@ Phase 5 is done when:
 - `/start`, `/help`, and `/status` accurately report the new command and whether TTS is configured
 - the existing OpenAI chat, `/image`, `/video`, polling, and webhook paths still work unchanged
 
+## Phase 6 - Fal Video Provider Support
+
+Status: `in_progress`
+
+Implementation worktree:
+
+- branch: `phase-6-fal-video-provider`
+- path: `.worktrees/phase-6-fal-video-provider`
+- baseline verification: `uv run pytest` passed with `133` tests
+
+### Goal
+
+Let the existing queued `/video` flow use Fal-hosted video models as an additional provider option without changing Telegram transport behavior.
+
+### Planned Scope
+
+- add a Fal video provider adapter behind the existing `VideoGenerator` interface
+- use Fal's queued submit, status, and result workflow rather than blocking the Telegram update handler
+- start with provider configuration that can target Fal-hosted models such as Kling 3 and Seedance 2
+- persist Fal jobs in the existing `generation_jobs` flow with `provider="fal"` or an equivalent provider identifier
+- download completed Fal output URLs only for Telegram delivery, keeping raw generated video bytes transient
+- expose safe model/provider presets through configuration and, where appropriate, `/settings`
+- keep Vertex and Runpod behavior unchanged unless Fal is explicitly configured or selected
+
+### Explicitly Out Of Scope
+
+- adding separate `/kling`, `/seedance`, or model-specific Telegram commands in the first Fal milestone
+- implementing per-user/per-chat quotas, daily media budget caps, prompt/reference-image moderation gates, or in-app provider-output URL retention/expiry handling
+- replacing the existing Vertex safety fallback to Runpod
+- distributed workers or external job queues
+
+### Design Notes
+
+- Fal should be treated as a provider route, not as a new media product surface.
+- The Telegram layer should continue to normalize commands and deliver videos only; Fal-specific request mapping belongs in the provider adapter.
+- The initial Fal adapter should preserve the current asynchronous video job contract: submit a job, poll by operation/request ID, fetch the completed asset, then deliver via `sendVideo`.
+- Model-specific capabilities such as Kling 3 native audio, Seedance reference inputs, duration options, and aspect ratios should be introduced as whitelisted presets instead of free-form user controls.
+- If a Fal result URL is temporary, Phase 6 still does not add durable in-app retention. Delivery should happen promptly, and durable storage remains a separate future decision.
+
+### Decisions (Resolved)
+
+- The first Fal model preset targets `fal-ai/kling-video/v3/standard/text-to-video` for text-to-video and supports additional per-mode endpoints via `FAL_VIDEO_IMAGE_TO_VIDEO_MODEL`, `FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL`, and `FAL_VIDEO_EDIT_MODEL`.
+- Persisted jobs use `provider="fal"`; the exact endpoint path is stored in the `model` column.
+- Per-mode model endpoints are selected automatically based on whether the `/video` command includes a reference image and which endpoints are configured.
+- Aspect ratio (Kling, Gemini) and resolution (Seedance) are controlled by the existing orientation presets and `FAL_VIDEO_RESOLUTION`; duration is passed in the type expected by each model family.
+- `/settings` exposes `"fal"` as a video provider option; exact model selection remains environment-only.
+- Cost estimates reuse the same log-only `cost_per_second_usd` pattern via `FAL_VIDEO_COST_PER_SECOND_USD`.
+
+### Exit Criteria
+
+Phase 6 is done when:
+
+- an allowed user can submit a `/video <prompt>` job through a configured Fal provider and receive the generated video in Telegram
+- a reference-photo `/video <prompt>` command can route to a compatible Fal image-to-video model when configured
+- Fal submission, polling, completion, failure, and Telegram delivery are covered by automated tests
+- Fal failures return user-safe messages and do not break the existing Vertex or Runpod paths
+- generated video bytes and temporary provider URLs are not persisted in SQLite
+- README, `/status`, and `/settings` accurately report the configured Fal provider behavior
+
 ## Decisions To Lock Early
 
 These choices should be made before coding gets too far:
@@ -316,6 +411,7 @@ These choices should be made before coding gets too far:
 4. Video generation uses an asynchronous job model from the start.
 5. Telegram-specific code stays separate from provider and asset-management code.
 6. Text-to-speech generation stays separate from OpenAI chat and Vertex media providers.
+7. Fal provider support stays behind the video provider interface and does not introduce model-specific Telegram transport logic.
 
 ## Planning References
 
@@ -332,3 +428,6 @@ These choices should be made before coding gets too far:
 - Google Gen AI SDK overview: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/sdks/overview
 - ElevenLabs text-to-speech API: https://elevenlabs.io/docs/api-reference/text-to-speech/convert
 - ElevenLabs text-to-speech capabilities: https://elevenlabs.io/docs/overview/capabilities/text-to-speech
+- Fal queue API docs: https://docs.fal.ai/model-endpoints/queue
+- Fal Kling 3 video API docs: https://fal.ai/models/fal-ai/kling-video/v3/standard/image-to-video/api
+- Fal Seedance 2 video API docs: https://fal.ai/models/bytedance/seedance-2.0/image-to-video/api

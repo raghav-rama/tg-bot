@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
-from app.config import Settings
+from app.config import Settings, _fal_family_for_model
 from app.domain.commands import (
     ACCESS_DENIED_TEXT,
     EMPTY_TEXT_TEXT,
@@ -55,6 +55,7 @@ from app.domain.preferences import (
     UNKNOWN_SETTINGS_TEXT,
     active_settings_summary,
     chat_preset_for,
+    fal_video_model_preset_for,
     image_preset_for,
     parse_settings_callback,
     preset_for_preference,
@@ -267,8 +268,8 @@ class ChatService:
                     user_id=message.user_id,
                     command=message.command,
                     message_type=message.message_type,
-                    provider=provider_name,
-                    model=model_name,
+                    provider=reply.provider or provider_name,
+                    model=reply.model or model_name,
                     latency_ms=latency_ms,
                     delivered=reply.delivered,
                     **reply.usage_fields,
@@ -340,7 +341,7 @@ class ChatService:
                 error_type="UnauthorizedUserError",
             )
 
-        parsed = parse_settings_callback(callback_data)
+        parsed = parse_settings_callback(callback_data, settings=self.settings)
         if parsed is None:
             return ServiceReply(text=UNKNOWN_SETTINGS_TEXT, error_type="ValidationError")
 
@@ -359,10 +360,14 @@ class ChatService:
                 user_id=user_id,
             )
             return ServiceReply(
-                text=active_settings_summary(preferences=preferences),
+                text=active_settings_summary(
+                    preferences=preferences,
+                    settings=self.settings,
+                ),
                 settings_menu=settings_menu_for(
                     preference_type=preference_type,
                     active_preset_id=preset_id,
+                    settings=self.settings,
                 ),
             )
 
@@ -379,11 +384,15 @@ class ChatService:
             text=(
                 SETTINGS_TEXT
                 if preference_type is None
-                else active_settings_summary(preferences=preferences)
+                else active_settings_summary(
+                    preferences=preferences,
+                    settings=self.settings,
+                )
             ),
             settings_menu=settings_menu_for(
                 preference_type=preference_type,
                 active_preset_id=active_preset_id,
+                settings=self.settings,
             ),
         )
 
@@ -416,9 +425,59 @@ class ChatService:
         )
         if preference is None:
             return None
-        if preset_for_preference(preference_type, preference.preset_id) is None:
+        if (
+            preset_for_preference(
+                preference_type,
+                preference.preset_id,
+                settings=self.settings,
+            )
+            is None
+        ):
             return None
         return preference
+
+    async def _fal_video_family_for_user(
+        self,
+        *,
+        chat_id: int,
+        user_id: int,
+        has_reference_image: bool = False,
+    ) -> str:
+        preference = await self._preference_for_user(
+            chat_id=chat_id,
+            user_id=user_id,
+            preference_type="fal_video_model",
+        )
+        if preference is not None:
+            family = preference.preset_id
+            if family in self.settings.fal_video_available_families:
+                return family
+            self.logger.warning(
+                log_kv(
+                    "fal_video_family_unavailable",
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    requested_family=family,
+                    available_families=sorted(
+                        self.settings.fal_video_available_families
+                    ),
+                )
+            )
+        # If no preference is set, derive a sensible family from the configured
+        # mode-specific endpoints so that text/image/reference requests use a
+        # matching endpoint without requiring the user to open /settings first.
+        if has_reference_image:
+            for model in (
+                self.settings.fal_video_reference_to_video_model,
+                self.settings.fal_video_image_to_video_model,
+            ):
+                if model:
+                    return _fal_family_for_model(model)
+        text_model = (
+            self.settings.fal_video_text_to_video_model
+            or self.settings.fal_video_model
+        )
+        return _fal_family_for_model(text_model)
 
     async def _begin_run(self, chat_id: int) -> _ActiveRun:
         new_run = _ActiveRun()
@@ -497,17 +556,20 @@ class ChatService:
                 chat_id=message.chat_id,
                 user_id=message.user_id,
             )
-            reply_text = f"{reply_text}\n\n{active_settings_summary(preferences=preferences)}"
+            reply_text = f"{reply_text}\n\n{active_settings_summary(preferences=preferences, settings=self.settings)}"
         elif command == "/settings":
             preferences = await self._preferences_for_user(
                 chat_id=message.chat_id,
                 user_id=message.user_id,
             )
-            reply_text = active_settings_summary(preferences=preferences)
+            reply_text = active_settings_summary(
+                preferences=preferences,
+                settings=self.settings,
+            )
             await self._persist_command_exchange(conversation, message, reply_text)
             return ServiceReply(
                 text=reply_text,
-                settings_menu=settings_menu_for(),
+                settings_menu=settings_menu_for(settings=self.settings),
             )
         elif command == "/image":
             return await self._handle_image_command(
@@ -655,7 +717,13 @@ class ChatService:
                 "file_size": sent_photo.file_size,
             }
         )
-        return ServiceReply(text="", delivered=True, usage_fields=usage_fields)
+        return ServiceReply(
+            text="",
+            delivered=True,
+            usage_fields=usage_fields,
+            provider="vertex",
+            model=image_model,
+        )
 
     async def _handle_video_command(
         self,
@@ -768,7 +836,11 @@ class ChatService:
                 else "auto"
             )
         )
-        requested_provider = "runpod" if provider_hint == "runpod" else "vertex"
+        requested_provider = (
+            self.settings.video_provider_order[0]
+            if provider_hint == "auto"
+            else provider_hint
+        )
         requested_pipeline = None
         requested_num_inference_steps = None
         requested_seed = None
@@ -789,11 +861,41 @@ class ChatService:
             if message.image is not None and reference_strength_preset is not None:
                 requested_image_strength = reference_strength_preset.image_strength
 
-        requested_model = (
-            pipeline_preset.model
-            if requested_provider == "runpod" and pipeline_preset is not None
-            else self._video_model_for_provider(requested_provider)
-        )
+        requested_model: str | None = None
+        requested_resolution: str | None = None
+        requested_fal_family: str | None = None
+        if requested_provider == "fal":
+            requested_fal_family = await self._fal_video_family_for_user(
+                chat_id=message.chat_id,
+                user_id=message.user_id,
+                has_reference_image=message.image is not None,
+            )
+            requested_model = self.settings.fal_video_model_for_mode(
+                requested_fal_family,
+                has_reference_image=message.image is not None,
+            )
+            requested_resolution = self.settings.fal_video_resolution
+            model_locked = True
+        elif requested_provider == "runpod":
+            if pipeline_preset is not None:
+                requested_model = pipeline_preset.model
+                model_locked = True
+            if requested_pipeline == "two_stage" and quality_preset is not None:
+                requested_num_inference_steps = quality_preset.num_inference_steps
+            if seed_preset is not None:
+                requested_seed = (
+                    random.randint(0, 2_147_483_647)
+                    if seed_preset.randomize
+                    else seed_preset.seed
+                )
+            if message.image is not None and reference_strength_preset is not None:
+                requested_image_strength = reference_strength_preset.image_strength
+            requested_model = requested_model or self._video_model_for_provider(
+                requested_provider
+            )
+        else:
+            requested_model = self._video_model_for_provider(requested_provider)
+
         requested_aspect_ratio = (
             orientation_preset.vertex_aspect_ratio
             if orientation_preset is not None
@@ -850,30 +952,55 @@ class ChatService:
                 runpod_num_inference_steps=requested_num_inference_steps,
                 runpod_seed=requested_seed,
                 runpod_image_strength=requested_image_strength,
+                resolution=requested_resolution,
                 **usage_fields,
             )
         )
-        submitted_job = await self.video_generator.submit_video(
-            VideoGenerationRequest(
-                chat_id=message.chat_id,
-                user_id=message.user_id,
-                prompt=prompt,
-                model=requested_model,
-                aspect_ratio=requested_aspect_ratio,
-                duration_seconds=requested_duration_seconds,
-                output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
-                reference_image=message.image,
-                provider_hint=provider_hint,
-                width=requested_width,
-                height=requested_height,
-                frame_rate=requested_frame_rate,
-                pipeline=requested_pipeline,
-                num_inference_steps=requested_num_inference_steps,
-                seed=requested_seed,
-                image_strength=requested_image_strength,
-                model_locked=model_locked,
+        try:
+            submitted_job = await self.video_generator.submit_video(
+                VideoGenerationRequest(
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    prompt=prompt,
+                    model=requested_model,
+                    aspect_ratio=requested_aspect_ratio,
+                    duration_seconds=requested_duration_seconds,
+                    output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
+                    reference_image=message.image,
+                    provider_hint=provider_hint,
+                    width=requested_width,
+                    height=requested_height,
+                    frame_rate=requested_frame_rate,
+                    pipeline=requested_pipeline,
+                    num_inference_steps=requested_num_inference_steps,
+                    seed=requested_seed,
+                    image_strength=requested_image_strength,
+                    model_locked=model_locked,
+                    resolution=requested_resolution,
+                )
             )
-        )
+        except (ProviderTimeoutError, ProviderUpstreamError) as exc:
+            self.logger.warning(
+                log_kv(
+                    "provider_failure",
+                    update_id=message.update_id,
+                    chat_id=message.chat_id,
+                    user_id=message.user_id,
+                    message_type=message.message_type,
+                    provider=requested_provider,
+                    model=requested_model,
+                    error_type=type(exc).__name__,
+                ),
+                exc_info=True,
+            )
+            await self._persist_command_reply(conversation, VIDEO_GENERATION_RETRY_TEXT)
+            await self.conversations.touch(conversation.id)
+            return ServiceReply(
+                text=VIDEO_GENERATION_RETRY_TEXT,
+                provider=requested_provider,
+                model=requested_model,
+            )
+
         self.logger.info(
             log_kv(
                 "video_generation_queued",
@@ -904,7 +1031,12 @@ class ChatService:
             duration_seconds=requested_duration_seconds,
             cost_per_second_usd=self._video_cost_for_provider(submitted_job.provider),
         )
-        return ServiceReply(text=VIDEO_GENERATION_QUEUED_TEXT, usage_fields=usage_fields)
+        return ServiceReply(
+            text=VIDEO_GENERATION_QUEUED_TEXT,
+            usage_fields=usage_fields,
+            provider=submitted_job.provider,
+            model=submitted_job.raw_model,
+        )
 
     async def _persist_command_exchange(
         self,
@@ -1197,12 +1329,10 @@ class ChatService:
         if self._is_image_command(message):
             return ("vertex", self.settings.vertex_image_model)
         if self._is_video_command(message):
-            provider = (
-                "runpod"
-                if (message.command or "").lower() == "/video_ltx"
-                else "vertex"
-            )
-            return (provider, self._video_model_for_provider(provider))
+            if (message.command or "").lower() == "/video_ltx":
+                return ("runpod", self._video_model_for_provider("runpod"))
+            first_provider = self.settings.video_provider_order[0]
+            return (first_provider, self._video_model_for_provider(first_provider))
         if message.message_type != "command":
             return ("openai", self.settings.openai_model)
         return (None, None)
@@ -1222,16 +1352,22 @@ class ChatService:
     def _video_model_for_provider(self, provider: str) -> str:
         if provider == "runpod":
             return self.settings.runpod_video_model
+        if provider == "fal":
+            return self.settings.fal_video_model
         return self.settings.vertex_video_model
 
     def _video_cost_for_provider(self, provider: str) -> float:
         if provider == "runpod":
             return self.settings.runpod_video_cost_per_second_usd
+        if provider == "fal":
+            return self.settings.fal_video_cost_per_second_usd
         return self.settings.vertex_video_cost_per_second_usd
 
     def _video_duration_for_provider(self, provider: str) -> int | None:
         if provider == "runpod":
             return self.settings.runpod_video_duration_seconds
+        if provider == "fal":
+            return self.settings.vertex_video_duration_seconds
         return self.settings.vertex_video_duration_seconds
 
     def _video_status_model(self) -> str:
@@ -1240,6 +1376,8 @@ class ChatService:
             enabled_models.append(f"vertex:{self.settings.vertex_video_model}")
         if self.settings.runpod_video_generation_enabled:
             enabled_models.append(f"runpod:{self.settings.runpod_video_model}")
+        if self.settings.fal_video_generation_enabled:
+            enabled_models.append(f"fal:{self.settings.fal_video_model}")
         return ", ".join(enabled_models) or self.settings.vertex_video_model
 
     def _drafts_enabled(

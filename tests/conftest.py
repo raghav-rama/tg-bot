@@ -116,7 +116,10 @@ class FakeVideoGenerator:
         self.submit_calls.append(request)
         if self.submit_error is not None:
             raise self.submit_error
-        provider = "runpod" if request.provider_hint == "runpod" else "vertex"
+        hint = request.provider_hint or "vertex"
+        provider = hint
+        if hint == "auto":
+            provider = "vertex"
         return SubmittedVideoJob(
             operation_name=f"operations/{len(self.submit_calls)}",
             provider=provider,
@@ -170,7 +173,7 @@ def build_settings(database_path: Path, **overrides) -> Settings:
         "VIDEO_JOB_POLL_INTERVAL_SECONDS": "15",
     }
     values.update(overrides)
-    return Settings(**values)
+    return Settings(_env_file=None, **values)
 
 
 @pytest_asyncio.fixture

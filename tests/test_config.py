@@ -30,6 +30,16 @@ _REPO_ENV_KEYS = (
     "RUNPOD_VIDEO_SIGNED_URL_TTL_SECONDS",
     "RUNPOD_VIDEO_TTL_MS",
     "RUNPOD_VIDEO_WIDTH",
+    "FAL_API_KEY",
+    "FAL_VIDEO_BASE_URL",
+    "FAL_VIDEO_MODEL",
+    "FAL_VIDEO_IMAGE_TO_VIDEO_MODEL",
+    "FAL_VIDEO_REFERENCE_IMAGE_MAX_BYTES",
+    "FAL_VIDEO_COST_PER_SECOND_USD",
+    "FAL_VIDEO_SUBMIT_TIMEOUT_SECONDS",
+    "FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL",
+    "FAL_VIDEO_EDIT_MODEL",
+    "FAL_VIDEO_RESOLUTION",
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_ALLOWED_USER_IDS",
     "TELEGRAM_WEBHOOK_DROP_PENDING_UPDATES",
@@ -100,10 +110,22 @@ def test_draft_streaming_defaults_are_conservative(tmp_path, monkeypatch) -> Non
     assert settings.openai_output_cost_per_1m_tokens_usd == 0.0
     assert settings.vertex_image_cost_per_image_usd == 0.0
     assert settings.vertex_video_cost_per_second_usd == 0.0
+    assert settings.runpod_video_cost_per_second_usd == 0.0
+    assert settings.fal_video_base_url == "https://queue.fal.run"
+    assert settings.fal_video_model == "fal-ai/kling-video/v3/standard/text-to-video"
+    assert settings.fal_video_image_to_video_model is None
+    assert settings.fal_video_reference_image_max_bytes == 6_000_000
+    assert settings.fal_video_cost_per_second_usd == 0.0
+    assert settings.fal_video_submit_timeout_seconds == 45
+    assert settings.fal_video_reference_to_video_model is None
+    assert settings.fal_video_edit_model is None
+    assert settings.fal_video_resolution == "720p"
     assert settings.vertex_image_generation_enabled is False
     assert settings.vertex_video_generation_enabled is False
     assert settings.runpod_video_generation_enabled is False
+    assert settings.fal_video_generation_enabled is False
     assert settings.video_generation_enabled is False
+
 
 
 def test_cost_estimate_rates_can_be_configured(tmp_path, monkeypatch) -> None:
@@ -203,8 +225,70 @@ def test_runpod_only_video_config_enables_video_generation(tmp_path, monkeypatch
 
     assert settings.vertex_video_generation_enabled is False
     assert settings.runpod_video_generation_enabled is True
+    assert settings.fal_video_generation_enabled is False
     assert settings.video_generation_enabled is True
     assert settings.video_provider_order == ("runpod",)
+
+
+async def test_fal_video_provider_order_requires_api_key(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    with pytest.raises(ValidationError, match="FAL_API_KEY is required"):
+        Settings(
+            _env_file=None,
+            TELEGRAM_BOT_TOKEN="test-token",
+            OPENAI_API_KEY="test-key",
+            TELEGRAM_ALLOWED_USER_IDS="42",
+            APP_UPDATE_MODE="webhook",
+            TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+            TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+            SQLITE_PATH=str(tmp_path / "bot.db"),
+            VIDEO_PROVIDER_ORDER="fal,vertex",
+        )
+
+
+async def test_fal_only_video_config_enables_video_generation(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        VIDEO_PROVIDER_ORDER="fal",
+        FAL_API_KEY="fal-test-key",
+    )
+
+    assert settings.vertex_video_aspect_ratio == "9:16"
+    assert settings.vertex_video_generation_enabled is False
+    assert settings.runpod_video_generation_enabled is False
+    assert settings.fal_video_generation_enabled is True
+    assert settings.video_generation_enabled is True
+    assert settings.video_provider_order == ("fal",)
+
+
+async def test_fal_video_provider_order_accepted(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        VIDEO_PROVIDER_ORDER="fal,vertex,runpod",
+        FAL_API_KEY="fal-test-key",
+        VERTEX_API_KEY="vertex-test-key",
+        RUNPOD_API_KEY="runpod-test-key",
+        RUNPOD_VIDEO_ENDPOINT_ID="ltx-endpoint",
+    )
+
+    assert settings.video_provider_order == ("fal", "vertex", "runpod")
+    assert settings.video_generation_enabled is True
 
 
 def test_video_provider_order_env_accepts_comma_separated_value(
@@ -427,6 +511,93 @@ def test_webhook_url_must_be_https(tmp_path, monkeypatch) -> None:
             TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
             SQLITE_PATH=str(tmp_path / "bot.db"),
         )
+
+
+def test_fal_video_family_detection_from_mode_endpoints(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        FAL_API_KEY="test-fal-key",
+        FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/google/gemini-omni-flash",
+        FAL_VIDEO_IMAGE_TO_VIDEO_MODEL="fal-ai/google/gemini-omni-flash/image-to-video",
+        FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL="fal-ai/google/gemini-omni-flash/reference-to-video",
+    )
+
+    assert settings.fal_video_available_families == {"gemini"}
+    assert settings.fal_video_default_family == "gemini"
+    assert settings.fal_video_model_for_mode("gemini") == "fal-ai/google/gemini-omni-flash"
+    assert (
+        settings.fal_video_model_for_mode("gemini", has_reference_image=True)
+        == "fal-ai/google/gemini-omni-flash/reference-to-video"
+    )
+
+
+def test_fal_video_model_for_mode_falls_back_to_text_model(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        FAL_API_KEY="test-fal-key",
+        FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/google/gemini-omni-flash",
+    )
+
+    assert settings.fal_video_model_for_mode("gemini", has_reference_image=True) == (
+        "fal-ai/google/gemini-omni-flash"
+    )
+
+
+def test_fal_video_available_families_includes_multiple_families(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        FAL_API_KEY="test-fal-key",
+        FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/kling-video/v3/standard/text-to-video",
+        FAL_VIDEO_REFERENCE_TO_VIDEO_MODEL="bytedance/seedance-2.0/reference-to-video",
+    )
+
+    assert settings.fal_video_available_families == {"kling", "seedance"}
+
+
+def test_fal_video_available_families_ignores_edit_only_family(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        FAL_API_KEY="test-fal-key",
+        FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/kling-video/v3/standard/text-to-video",
+        FAL_VIDEO_EDIT_MODEL="fal-ai/google/gemini-omni-flash/edit",
+    )
+
+    assert settings.fal_video_available_families == {"kling"}
 
 
 def test_webhook_secret_token_is_restricted_to_telegram_charset(
