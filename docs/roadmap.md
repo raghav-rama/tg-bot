@@ -16,15 +16,13 @@ This document separates the current repo state from the planned delivery phases.
 
 - Active phases:
   - `Phase 5 - ElevenLabs Hindi Text To Speech`
-  - `Phase 6 - Fal Video Provider Support`
 - Status: `in_progress`
 - Updated: `2026-07-05`
 - Previous phase accepted: `Phase 4 - Hardening And Expansion`
-- Parallel implementation worktrees:
+- `Phase 6 - Fal Video Provider Support` is accepted as complete and merged into `dev`.
+- Parallel implementation worktree:
   - Phase 5 branch: `phase-5-elevenlabs-tts`
   - Phase 5 path: `.worktrees/phase-5-elevenlabs-tts`
-  - Phase 6 branch: `phase-6-fal-video-provider`
-  - Phase 6 path: `.worktrees/phase-6-fal-video-provider`
 - Evidence:
   - Phase 1 foundation work is accepted as complete for repo sequencing
   - Phase 1.5 draft streaming is accepted as complete and no longer blocks the next milestone
@@ -41,11 +39,12 @@ This document separates the current repo state from the planned delivery phases.
   - the remaining quota, budget-cap, moderation-gate, and in-app provider-output URL retention/expiry items are explicitly deferred out of Phase 4
   - the optional provider strategy review is represented by active Phase 6 Fal provider support
   - Phase 5 and Phase 6 implementation worktrees were created from `dev` after the `.worktrees/` ignore-rule commit
-  - both Phase 5 and Phase 6 worktrees passed baseline `uv run pytest` with `133` tests passing
+  - Phase 6 Fal provider support has been accepted as complete and merged into `dev`
+  - `uv run pytest` now passes with `172` tests on `dev` after the Fal provider and per-family model selection work
 
 ## Current State
 
-As of `2026-06-18`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, the completed Phase 3 video-generation slice, and the completed Phase 4 hardening and expansion work. Phase 5 ElevenLabs Hindi text-to-speech and Phase 6 Fal video provider support are in progress in parallel isolated git worktrees.
+As of `2026-07-05`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, the completed Phase 3 video-generation slice, the completed Phase 4 hardening and expansion work, and the completed Phase 6 Fal video provider support merged into `dev`. Phase 5 ElevenLabs Hindi text-to-speech remains in progress in an isolated git worktree.
 
 - Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, OpenAI chat, Vertex image plus video generation, and Runpod LTX video fallback.
 - A polling-first runtime exists, and webhook mode now reuses the same shared processing path when enabled.
@@ -65,7 +64,7 @@ As of `2026-06-18`, this repository contains the completed Phase 1 foundation, t
 - Phase 6 now has a `FalVideoProvider` adapter behind the existing `VideoGenerator` interface, using the Fal queue REST API (`https://queue.fal.run/{model_id}`) with submit, status, and result polling.
 - Phase 6 supports Fal-hosted Kling, Seedance 2.0, and Gemini Omni Flash endpoints for text-to-video, image-to-video, and reference-to-video modes by inferring the model family and mode from the configured endpoint path.
 - Reference images are sent to Fal as base64 data URIs using the correct parameter name per model family (`start_image_url` for Kling, `image_url` for Seedance/Gemini, `image_urls` for reference-to-video).
-- Phase 6 exposes `"fal"` as a selectable video provider in `/settings`; exact model endpoints remain environment-only.
+- `/settings` exposes `"fal"` as a video provider option and, when more than one Fal family is configured, a **Fal model** sub-menu lets users pick Kling, Seedance, or Gemini per chat.
 - Real Vertex, Runpod, Fal, and Telegram verification still depends on configured credentials and a manual runtime check.
 - Inline generated video bytes remain transient in memory only, while URI-backed assets are expected to live in a bucket with lifecycle cleanup managed outside the app.
 - Phase 4 includes a real webhook deployment path: webhook mode now registers the Telegram webhook on startup, validates the `X-Telegram-Bot-Api-Secret-Token` header on inbound requests, and reports webhook setup state through readiness.
@@ -344,13 +343,9 @@ Phase 5 is done when:
 
 ## Phase 6 - Fal Video Provider Support
 
-Status: `in_progress`
+Status: `complete`
 
-Implementation worktree:
-
-- branch: `phase-6-fal-video-provider`
-- path: `.worktrees/phase-6-fal-video-provider`
-- baseline verification: `uv run pytest` passed with `133` tests
+Merged into `dev`. The dedicated planning doc is [phase-6-fal-video-provider.md](phase-6-fal-video-provider.md).
 
 ### Goal
 
@@ -387,7 +382,7 @@ Let the existing queued `/video` flow use Fal-hosted video models as an addition
 - Persisted jobs use `provider="fal"`; the exact endpoint path is stored in the `model` column.
 - Per-mode model endpoints are selected automatically based on whether the `/video` command includes a reference image and which endpoints are configured.
 - Aspect ratio (Kling, Gemini) and resolution (Seedance) are controlled by the existing orientation presets and `FAL_VIDEO_RESOLUTION`; duration is passed in the type expected by each model family.
-- `/settings` exposes `"fal"` as a video provider option; exact model selection remains environment-only.
+- `/settings` exposes `"fal"` as a video provider option and, when more than one Fal family is configured, a **Fal model** sub-menu lets users pick Kling, Seedance, or Gemini per chat.
 - Cost estimates reuse the same log-only `cost_per_second_usd` pattern via `FAL_VIDEO_COST_PER_SECOND_USD`.
 
 ### Exit Criteria
@@ -395,11 +390,13 @@ Let the existing queued `/video` flow use Fal-hosted video models as an addition
 Phase 6 is done when:
 
 - an allowed user can submit a `/video <prompt>` job through a configured Fal provider and receive the generated video in Telegram
-- a reference-photo `/video <prompt>` command can route to a compatible Fal image-to-video model when configured
+- a reference-photo `/video <prompt>` command can route to a compatible Fal image-to-video or reference-to-video model when configured
 - Fal submission, polling, completion, failure, and Telegram delivery are covered by automated tests
 - Fal failures return user-safe messages and do not break the existing Vertex or Runpod paths
 - generated video bytes and temporary provider URLs are not persisted in SQLite
 - README, `/status`, and `/settings` accurately report the configured Fal provider behavior
+
+Phase 6 exit criteria are satisfied on `dev` as of `2026-07-05` with `172` passing tests.
 
 ## Decisions To Lock Early
 
