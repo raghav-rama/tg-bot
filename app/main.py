@@ -146,7 +146,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 video_providers["fal"] = FalVideoProvider(
                     api_key=loaded_settings.fal_api_key.get_secret_value(),
                     base_url=loaded_settings.fal_video_base_url,
-                    default_model=loaded_settings.fal_video_model,
+                    default_model=(
+                        loaded_settings.fal_video_text_to_video_model
+                        or loaded_settings.fal_video_model
+                    ),
                     image_to_video_model=loaded_settings.fal_video_image_to_video_model,
                     reference_to_video_model=loaded_settings.fal_video_reference_to_video_model,
                     edit_model=loaded_settings.fal_video_edit_model,

@@ -581,6 +581,25 @@ def test_fal_video_available_families_includes_multiple_families(
     assert settings.fal_video_available_families == {"kling", "seedance"}
 
 
+def test_fal_video_available_families_ignores_edit_only_family(tmp_path, monkeypatch) -> None:
+    _clear_repo_env(monkeypatch)
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="test-token",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        FAL_API_KEY="test-fal-key",
+        FAL_VIDEO_TEXT_TO_VIDEO_MODEL="fal-ai/kling-video/v3/standard/text-to-video",
+        FAL_VIDEO_EDIT_MODEL="fal-ai/google/gemini-omni-flash/edit",
+    )
+
+    assert settings.fal_video_available_families == {"kling"}
+
+
 def test_webhook_secret_token_is_restricted_to_telegram_charset(
     tmp_path,
     monkeypatch,

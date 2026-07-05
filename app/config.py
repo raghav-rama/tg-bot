@@ -530,7 +530,6 @@ class Settings(BaseSettings):
             self.fal_video_text_to_video_model or self.fal_video_model,
             self.fal_video_image_to_video_model,
             self.fal_video_reference_to_video_model,
-            self.fal_video_edit_model,
         ):
             if model:
                 families.add(_fal_family_for_model(model))

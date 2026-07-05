@@ -442,3 +442,25 @@ async def test_locked_image_to_video_model_falls_back_to_text_when_no_reference(
     payload = json.loads(requests[0].content)
     assert "start_image_url" not in payload
     assert "image_url" not in payload
+
+
+@pytest.mark.asyncio
+async def test_locked_image_to_video_model_uses_custom_text_override_on_fallback() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"request_id": "fal-fallback-3"})
+
+    provider = make_provider(
+        handler,
+        default_model="fal-ai/google/gemini-omni-flash",
+        image_to_video_model="fal-ai/google/gemini-omni-flash/image-to-video",
+    )
+    request = make_request(model="fal-ai/google/gemini-omni-flash/image-to-video")
+    request.model_locked = True
+
+    submitted = await provider.submit_video(request)
+
+    assert submitted.raw_model == "fal-ai/google/gemini-omni-flash"
+    assert requests[0].url.path == "/fal-ai/google/gemini-omni-flash"
