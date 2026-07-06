@@ -93,6 +93,7 @@ def test_settings_menu_uses_compact_callback_data() -> None:
     assert "prefs:menu:video_duration" in video_menu_callback_data
     assert "prefs:menu:runpod_reference_strength" in video_menu_callback_data
     assert "prefs:video_duration:duration_6s" in duration_callback_data
+    assert "prefs:video_duration:duration_10s" in duration_callback_data
     assert [button.text for button in main_menu.rows[0]] == [
         "🎬 Video",
         "🖼️ Image",
@@ -122,14 +123,14 @@ def test_settings_menu_uses_compact_callback_data() -> None:
 
 def test_presets_map_to_request_overrides() -> None:
     provider_preset = video_provider_preset_for("runpod")
-    duration_preset = video_duration_preset_for("duration_8s")
+    duration_preset = video_duration_preset_for("duration_10s")
     orientation_preset = video_orientation_preset_for("portrait_9_16")
     pipeline_preset = runpod_pipeline_preset_for("two_stage")
     quality_preset = runpod_quality_preset_for("high")
     image_preset = image_preset_for("gemini_landscape_jpeg")
 
     assert provider_preset.provider_hint == "runpod"
-    assert duration_preset.duration_seconds == 8
+    assert duration_preset.duration_seconds == 10
     assert orientation_preset.aspect_ratio == "9:16"
     assert orientation_preset.runpod_width == 576
     assert orientation_preset.runpod_height == 1024
@@ -286,7 +287,7 @@ def test_active_settings_summary_includes_fal_model() -> None:
                 chat_id=100,
                 user_id=42,
                 preference_type="video_duration",
-                preset_id="duration_8s",
+                preset_id="duration_10s",
                 updated_at=_utcnow(),
             ),
             "runpod_pipeline": UserPreference(
@@ -300,7 +301,7 @@ def test_active_settings_summary_includes_fal_model() -> None:
     )
 
     assert "Video provider: 🚀 Runpod LTX" in summary
-    assert "Video duration: ⏱️ 8s" in summary
+    assert "Video duration: ⏱️ 10s" in summary
     assert "Runpod pipeline: 🎞️ Two-stage" in summary
     assert "Image: Environment default" in summary
     assert "Chat: Environment default" in summary

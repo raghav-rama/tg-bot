@@ -857,7 +857,7 @@ async def test_video_command_uses_saved_video_preferences(service_bundle, monkey
         chat_id=226,
         user_id=42,
         preference_type="video_duration",
-        preset_id="duration_8s",
+        preset_id="duration_10s",
         updated_at=utc_datetime(),
     )
     await preferences.set_preference(
@@ -906,7 +906,7 @@ async def test_video_command_uses_saved_video_preferences(service_bundle, monkey
     assert request["model"] == "ltx-2.3-22b"
     assert request["width"] == 576
     assert request["height"] == 1024
-    assert request["duration_seconds"] == 8
+    assert request["duration_seconds"] == 10
     assert request["frame_rate"] == 24.0
     assert request["pipeline"] == "two_stage"
     assert request["num_inference_steps"] == 50
