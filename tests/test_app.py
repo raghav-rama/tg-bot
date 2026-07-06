@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 
 from aiogram import Dispatcher
+
+import app.main as app_main
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -80,6 +82,62 @@ def _build_webhook_settings(tmp_path) -> Settings:
         TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
         SQLITE_PATH=str(tmp_path / "bot.db"),
     )
+
+
+def test_create_app_passes_gemini_image_timeout_to_provider(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeGeminiImageProvider:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+        async def close(self) -> None:
+            return None
+
+    class FakeGeminiVideoProvider:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+        async def close(self) -> None:
+            return None
+
+    async def fake_configure_webhook(
+        self,
+        *,
+        url: str,
+        secret_token: str,
+        drop_pending_updates: bool = False,
+        allowed_updates: list[str] | None = None,
+    ) -> None:
+        self._webhook_configured = True
+        self._webhook_url = url
+        self._last_error = None
+
+    monkeypatch.setattr(app_main, "GeminiImageProvider", FakeGeminiImageProvider)
+    monkeypatch.setattr(app_main, "GeminiVideoProvider", FakeGeminiVideoProvider)
+    monkeypatch.setattr(TelegramRuntime, "configure_webhook", fake_configure_webhook)
+
+    settings = Settings(
+        _env_file=None,
+        TELEGRAM_BOT_TOKEN="123456:TESTWebhookTokenValueForAppTests1234567890",
+        OPENAI_API_KEY="test-key",
+        TELEGRAM_ALLOWED_USER_IDS="42",
+        APP_UPDATE_MODE="webhook",
+        TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+        TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        SQLITE_PATH=str(tmp_path / "bot.db"),
+        GEMINI_API_KEY="gemini-test-key",
+        GEMINI_IMAGE_TIMEOUT_SECONDS="180",
+    )
+
+    with TestClient(create_app(settings)) as client:
+        ready_response = client.get("/readyz")
+
+    assert ready_response.status_code == 200
+    assert captured["timeout_seconds"] == 180
 
 
 def test_readyz_is_healthy_when_webhook_mode_is_configured(

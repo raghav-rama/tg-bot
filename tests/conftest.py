@@ -10,8 +10,11 @@ from app.config import Settings
 from app.domain.models import (
     GeneratedImageResult,
     GeneratedVideoResult,
+    ImageGenerationPollRequest,
+    ImageJobPollResult,
     ProviderResponse,
     StreamingProviderEvent,
+    SubmittedImageJob,
     SubmittedVideoJob,
     VideoGenerationPollRequest,
     VideoJobPollResult,
@@ -85,7 +88,12 @@ class FakeImageGenerator:
     def __init__(self, *, image_bytes: bytes = b"generated-image") -> None:
         self.image_bytes = image_bytes
         self.calls = []
+        self.submit_calls = []
+        self.poll_calls: list[ImageGenerationPollRequest] = []
         self.error: Exception | None = None
+        self.submit_error: Exception | None = None
+        self.poll_error: Exception | None = None
+        self.poll_results: list[ImageJobPollResult] = []
 
     async def generate_image(self, request):
         self.calls.append(request)
@@ -94,9 +102,37 @@ class FakeImageGenerator:
         return GeneratedImageResult(
             image_bytes=self.image_bytes,
             mime_type=request.output_mime_type,
-            provider="vertex",
+            provider="gemini",
             raw_model=request.model,
             prompt=request.prompt,
+        )
+
+    async def submit_image(self, request):
+        self.submit_calls.append(request)
+        if self.submit_error is not None:
+            raise self.submit_error
+        return SubmittedImageJob(
+            operation_name=f"v1_image_interaction_{len(self.submit_calls)}",
+            provider="gemini",
+            raw_model=request.model,
+        )
+
+    async def poll_image(self, request: ImageGenerationPollRequest) -> ImageJobPollResult:
+        self.poll_calls.append(request)
+        if self.poll_error is not None:
+            raise self.poll_error
+        if self.poll_results:
+            return self.poll_results.pop(0)
+        return ImageJobPollResult(
+            status="completed",
+            operation_name=request.operation_name,
+            generated_image=GeneratedImageResult(
+                image_bytes=self.image_bytes,
+                mime_type=request.output_mime_type,
+                provider=request.provider,
+                raw_model=request.model,
+                prompt=request.prompt,
+            ),
         )
 
     async def close(self) -> None:
@@ -116,12 +152,12 @@ class FakeVideoGenerator:
         self.submit_calls.append(request)
         if self.submit_error is not None:
             raise self.submit_error
-        hint = request.provider_hint or "vertex"
+        hint = request.provider_hint or "gemini"
         provider = hint
         if hint == "auto":
-            provider = "vertex"
+            provider = "gemini"
         return SubmittedVideoJob(
-            operation_name=f"operations/{len(self.submit_calls)}",
+            operation_name=f"v1_interaction_{len(self.submit_calls)}",
             provider=provider,
             raw_model=request.model,
         )
@@ -161,14 +197,14 @@ def build_settings(database_path: Path, **overrides) -> Settings:
         "TELEGRAM_WEBHOOK_SECRET_TOKEN": "test-webhook-secret",
         "SQLITE_PATH": str(database_path),
         "OPENAI_MODEL": "gpt-4.1-mini",
-        "VERTEX_PROJECT_ID": "test-project",
+        "GEMINI_API_KEY": "gemini-test-key",
         "BOT_ENABLE_MESSAGE_DRAFTS": "true",
         "BOT_DRAFT_STREAM_ON_IMAGES": "false",
         "BOT_DRAFT_START_DELAY_MS": "750",
         "BOT_DRAFT_UPDATE_INTERVAL_MS": "1200",
         "BOT_DRAFT_MIN_CHARS_DELTA": "80",
-        "VERTEX_VIDEO_MODEL": "veo-3.0-fast-generate-001",
-        "VERTEX_VIDEO_DURATION_SECONDS": "4",
+        "GEMINI_VIDEO_MODEL": "gemini-omni-flash-preview",
+        "GEMINI_VIDEO_DURATION_SECONDS": "4",
         "BOT_VIDEO_MAX_BYTES": str(50 * 1024 * 1024),
         "VIDEO_JOB_POLL_INTERVAL_SECONDS": "15",
     }

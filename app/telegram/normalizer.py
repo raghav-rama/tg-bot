@@ -42,8 +42,7 @@ def normalize_message(
                 else None
             )
             if (
-                command in {"/image", "/video", "/video_ltx"}
-                and reply_image_bytes is not None
+                command in {"/image", "/video"}
                 and reply_photo
             ):
                 image = _build_image_input(
@@ -83,17 +82,15 @@ def normalize_message(
         )
 
     if message.photo:
-        if image_bytes is None:
-            raise ValidationError("Photo bytes were not downloaded")
         caption = message.caption.strip() if message.caption else None
-        image = _build_image_input(
-            photo_sizes=message.photo,
-            image_bytes=image_bytes,
-            image_max_bytes=image_max_bytes,
-            caption=caption,
-        )
         command = _extract_command(caption) if caption else None
-        if command in {"/image", "/video", "/video_ltx"}:
+        if command in {"/image", "/video"}:
+            image = _build_image_input(
+                photo_sizes=message.photo,
+                image_bytes=image_bytes,
+                image_max_bytes=image_max_bytes,
+                caption=caption,
+            )
             return InboundMessage(
                 update_id=update_id,
                 telegram_message_id=message.message_id,
@@ -109,6 +106,14 @@ def normalize_message(
                 sent_at=sent_at,
             )
 
+        if image_bytes is None:
+            raise ValidationError("Photo bytes were not downloaded")
+        image = _build_image_input(
+            photo_sizes=message.photo,
+            image_bytes=image_bytes,
+            image_max_bytes=image_max_bytes,
+            caption=caption,
+        )
         return InboundMessage(
             update_id=update_id,
             telegram_message_id=message.message_id,
@@ -137,15 +142,31 @@ def _extract_command(text: str) -> str | None:
 def _build_image_input(
     *,
     photo_sizes: Sequence[PhotoSize],
-    image_bytes: bytes,
+    image_bytes: bytes | None,
     image_max_bytes: int,
     caption: str | None,
 ) -> ImageInput:
+    largest = photo_sizes[-1]
+    if image_bytes is None:
+        if largest.file_size is not None and largest.file_size > image_max_bytes:
+            raise ValidationError(
+                f"That image is too large. Please send one under {image_max_bytes} bytes."
+            )
+        return ImageInput(
+            telegram_file_id=largest.file_id,
+            telegram_file_unique_id=largest.file_unique_id,
+            mime_type="image/jpeg",
+            width=largest.width,
+            height=largest.height,
+            byte_size=largest.file_size,
+            bytes_b64=None,
+            caption=caption,
+        )
+
     if len(image_bytes) > image_max_bytes:
         raise ValidationError(
             f"That image is too large. Please send one under {image_max_bytes} bytes."
         )
-    largest = photo_sizes[-1]
     return ImageInput(
         telegram_file_id=largest.file_id,
         telegram_file_unique_id=largest.file_unique_id,

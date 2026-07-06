@@ -31,7 +31,7 @@ class VideoProviderRouter:
         self,
         request: VideoGenerationRequest,
     ) -> SubmittedVideoJob:
-        direct_hint = request.provider_hint in {"vertex", "runpod", "fal"}
+        direct_hint = request.provider_hint in {"gemini", "runpod", "fal"}
         if direct_hint:
             return await self._submit_to_provider(request, request.provider_hint)
 
@@ -39,31 +39,25 @@ class VideoProviderRouter:
         for provider_name in self.provider_order:
             if provider_name not in self.providers:
                 continue
-            if provider_name != "vertex" and last_safety_error is not None:
+            if last_safety_error is not None:
                 continue
             try:
                 return await self._submit_to_provider(request, provider_name)
             except ProviderSafetyError as exc:
                 last_safety_error = exc
-                runpod_allowed = (
-                    provider_name == "vertex"
-                    and "runpod" in self.provider_order
-                    and "runpod" in self.providers
-                )
+                fallback_provider = self._next_configured_provider(provider_name)
                 self.logger.warning(
                     log_kv(
                         "video_provider_safety_rejection",
                         provider=provider_name,
-                        fallback_provider="runpod" if runpod_allowed else None,
+                        fallback_provider=fallback_provider,
                         model=self.provider_models.get(provider_name),
                     )
                 )
-                if provider_name != "vertex":
-                    raise
-                if not runpod_allowed:
+                if fallback_provider is None:
                     raise
                 try:
-                    return await self._submit_to_provider(request, "runpod")
+                    return await self._submit_to_provider(request, fallback_provider)
                 except Exception:
                     raise exc
         if last_safety_error is not None:
@@ -80,6 +74,12 @@ class VideoProviderRouter:
     ) -> VideoJobPollResult:
         provider = self.providers.get(request.provider)
         if provider is None:
+            if request.provider == "vertex":
+                return VideoJobPollResult(
+                    status="failed",
+                    operation_name=request.operation_name,
+                    failure_reason="Legacy Vertex video jobs are no longer supported after the Gemini migration",
+                )
             raise ProviderUpstreamError(
                 f"Video provider is not configured for persisted job: {request.provider}"
             )

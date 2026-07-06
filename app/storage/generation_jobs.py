@@ -18,7 +18,7 @@ class GenerationJobRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    async def add_video_job(
+    async def add_image_job(
         self,
         *,
         conversation_id: int,
@@ -28,7 +28,7 @@ class GenerationJobRepository:
         provider: str,
         model: str,
         operation_name: str,
-        duration_seconds: int | None,
+        request_payload: str,
         created_at: datetime | None = None,
     ) -> int:
         now = created_at or _utcnow()
@@ -45,11 +45,11 @@ class GenerationJobRepository:
                     provider,
                     model,
                     operation_name,
-                    duration_seconds,
+                    request_payload,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, 'video', 'queued', ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, 'image', 'queued', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     conversation_id,
@@ -59,6 +59,57 @@ class GenerationJobRepository:
                     provider,
                     model,
                     operation_name,
+                    request_payload,
+                    _iso(now),
+                    _iso(now),
+                ),
+            )
+            return cursor.lastrowid
+
+    async def add_video_job(
+        self,
+        *,
+        conversation_id: int,
+        chat_id: int,
+        user_id: int,
+        prompt_text: str,
+        provider: str,
+        model: str,
+        operation_name: str,
+        duration_seconds: int | None,
+        request_payload: str | None = None,
+        created_at: datetime | None = None,
+    ) -> int:
+        now = created_at or _utcnow()
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                INSERT INTO generation_jobs (
+                    conversation_id,
+                    chat_id,
+                    user_id,
+                    job_type,
+                    status,
+                    prompt_text,
+                    provider,
+                    model,
+                    operation_name,
+                    request_payload,
+                    duration_seconds,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, 'video', 'queued', ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    conversation_id,
+                    chat_id,
+                    user_id,
+                    prompt_text,
+                    provider,
+                    model,
+                    operation_name,
+                    request_payload,
                     duration_seconds,
                     _iso(now),
                     _iso(now),
@@ -66,7 +117,7 @@ class GenerationJobRepository:
             )
             return cursor.lastrowid
 
-    async def list_pending_video_jobs(
+    async def list_pending_jobs(
         self,
         *,
         limit: int = 10,
@@ -84,6 +135,8 @@ class GenerationJobRepository:
                 provider,
                 model,
                 operation_name,
+                provider_operation_name,
+                request_payload,
                 output_uri,
                 mime_type,
                 telegram_message_id,
@@ -98,8 +151,7 @@ class GenerationJobRepository:
                 updated_at,
                 completed_at
             FROM generation_jobs
-            WHERE job_type = 'video'
-              AND status IN ('queued', 'running')
+            WHERE status IN ('queued', 'running')
             ORDER BY created_at ASC, id ASC
             LIMIT ?
             """,
@@ -108,6 +160,14 @@ class GenerationJobRepository:
         rows = await cursor.fetchall()
         await cursor.close()
         return [self._row_to_job(row) for row in rows]
+
+    async def list_pending_video_jobs(
+        self,
+        *,
+        limit: int = 10,
+    ) -> list[StoredGenerationJob]:
+        jobs = await self.list_pending_jobs(limit=limit)
+        return [job for job in jobs if job.job_type == "video"]
 
     async def list_for_conversation(
         self,
@@ -126,6 +186,8 @@ class GenerationJobRepository:
                 provider,
                 model,
                 operation_name,
+                provider_operation_name,
+                request_payload,
                 output_uri,
                 mime_type,
                 telegram_message_id,
@@ -157,11 +219,41 @@ class GenerationJobRepository:
                 UPDATE generation_jobs
                 SET status = 'running',
                     updated_at = ?,
-                    failure_reason = NULL
+                failure_reason = NULL
                 WHERE id = ?
                   AND status IN ('queued', 'running')
                 """,
                 (now, job_id),
+            )
+
+    async def mark_submitted(
+        self,
+        *,
+        job_id: int,
+        provider: str,
+        model: str,
+        provider_operation_name: str,
+    ) -> None:
+        now = _iso(_utcnow())
+        async with self.database.transaction() as connection:
+            await connection.execute(
+                """
+                UPDATE generation_jobs
+                SET status = 'running',
+                    provider = ?,
+                    model = ?,
+                    provider_operation_name = ?,
+                    updated_at = ?,
+                    failure_reason = NULL
+                WHERE id = ?
+                """,
+                (
+                    provider,
+                    model,
+                    provider_operation_name,
+                    now,
+                    job_id,
+                ),
             )
 
     async def mark_completed(
@@ -245,6 +337,8 @@ class GenerationJobRepository:
             provider=row["provider"],
             model=row["model"],
             operation_name=row["operation_name"],
+            provider_operation_name=row["provider_operation_name"],
+            request_payload=row["request_payload"],
             output_uri=row["output_uri"],
             mime_type=row["mime_type"],
             telegram_message_id=row["telegram_message_id"],

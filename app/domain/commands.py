@@ -8,7 +8,6 @@ SUPPORTED_COMMANDS = {
     "/settings",
     "/image",
     "/video",
-    "/video_ltx",
 }
 
 ACCESS_DENIED_TEXT = "Access denied."
@@ -25,17 +24,17 @@ IMAGE_PROMPT_REQUIRED_TEXT = (
 )
 IMAGE_GENERATION_NOT_CONFIGURED_TEXT = "Image generation is not configured right now."
 IMAGE_REFERENCE_REQUIRES_GEMINI_TEXT = (
-    "Reference images for /image require a Gemini image model. "
-    "Set VERTEX_IMAGE_MODEL to a Gemini image model and try again."
+    "Reference images for /image require a Gemini image-capable model. "
+    "Set GEMINI_IMAGE_MODEL to a Gemini image model and try again."
 )
 IMAGE_GENERATION_RETRY_TEXT = (
     "I couldn't generate an image just now. Please try again in a moment."
 )
+IMAGE_GENERATION_QUEUED_TEXT = (
+    "Image generation started. I'll send it here when it's ready."
+)
 VIDEO_PROMPT_REQUIRED_TEXT = (
     "Use /video followed by a prompt, for example: /video slow cinematic dolly shot through a neon alley"
-)
-VIDEO_LTX_PROMPT_REQUIRED_TEXT = (
-    "Use /video_ltx followed by a prompt, for example: /video_ltx slow cinematic dolly shot through a neon alley"
 )
 VIDEO_GENERATION_NOT_CONFIGURED_TEXT = "Video generation is not configured right now."
 VIDEO_GENERATION_QUEUED_TEXT = (
@@ -66,8 +65,7 @@ def render_start_message() -> str:
         "/reset\n"
         "/settings\n"
         "/image <prompt>\n"
-        "/video <prompt>\n"
-        "/video_ltx <prompt>"
+        "/video <prompt>"
     )
 
 
@@ -79,9 +77,8 @@ def render_help_message() -> str:
         "/status - show runtime status\n"
         "/reset - start a fresh conversation for this chat\n"
         "/settings - tune video, image, and chat presets\n"
-        "/image <prompt> - generate one image with Vertex AI\n"
-        "/video <prompt> - queue one short video with the configured providers\n"
-        "/video_ltx <prompt> - queue one short video directly with Runpod LTX\n\n"
+        "/image <prompt> - generate one image with Gemini\n"
+        "/video <prompt> - queue one short video with the configured providers\n\n"
         "Supported inputs:\n"
         "- text messages\n"
         "- one photo with an optional caption\n\n"

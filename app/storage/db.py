@@ -81,6 +81,8 @@ SCHEMA_STATEMENTS = (
         provider TEXT NOT NULL,
         model TEXT NOT NULL,
         operation_name TEXT NOT NULL,
+        provider_operation_name TEXT NULL,
+        request_payload TEXT NULL,
         output_uri TEXT NULL,
         mime_type TEXT NULL,
         telegram_message_id INTEGER NULL,
@@ -146,6 +148,7 @@ class Database:
         try:
             for statement in SCHEMA_STATEMENTS:
                 await connection.execute(statement)
+            await self._run_migrations(connection)
             await connection.commit()
         except aiosqlite.Error as exc:
             raise StorageError("failed to initialize SQLite schema") from exc
@@ -171,3 +174,31 @@ class Database:
                 raise
             else:
                 await connection.commit()
+
+    async def _run_migrations(self, connection: aiosqlite.Connection) -> None:
+        await self._ensure_generation_jobs_column(
+            connection,
+            "provider_operation_name",
+            "TEXT NULL",
+        )
+        await self._ensure_generation_jobs_column(
+            connection,
+            "request_payload",
+            "TEXT NULL",
+        )
+
+    async def _ensure_generation_jobs_column(
+        self,
+        connection: aiosqlite.Connection,
+        column_name: str,
+        column_sql: str,
+    ) -> None:
+        cursor = await connection.execute("PRAGMA table_info(generation_jobs)")
+        rows = await cursor.fetchall()
+        await cursor.close()
+        existing_columns = {row["name"] for row in rows}
+        if column_name in existing_columns:
+            return
+        await connection.execute(
+            f"ALTER TABLE generation_jobs ADD COLUMN {column_name} {column_sql}"
+        )

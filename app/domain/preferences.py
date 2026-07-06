@@ -38,7 +38,7 @@ class VideoDurationPreset:
 class VideoOrientationPreset:
     id: str
     label: str
-    vertex_aspect_ratio: str
+    aspect_ratio: str
     runpod_width: int
     runpod_height: int
 
@@ -104,10 +104,10 @@ VIDEO_PROVIDER_PRESETS: dict[str, VideoProviderPreset] = {
         label="🌐 Environment default",
         provider_hint="auto",
     ),
-    "vertex": VideoProviderPreset(
-        id="vertex",
-        label="🎥 Vertex Veo",
-        provider_hint="vertex",
+    "gemini": VideoProviderPreset(
+        id="gemini",
+        label="✨ Gemini",
+        provider_hint="gemini",
     ),
     "runpod": VideoProviderPreset(
         id="runpod",
@@ -148,21 +148,21 @@ VIDEO_ORIENTATION_PRESETS: dict[str, VideoOrientationPreset] = {
     "portrait_9_16": VideoOrientationPreset(
         id="portrait_9_16",
         label="📱 Portrait 9:16",
-        vertex_aspect_ratio="9:16",
+        aspect_ratio="9:16",
         runpod_width=576,
         runpod_height=1024,
     ),
     "landscape_16_9": VideoOrientationPreset(
         id="landscape_16_9",
         label="🌄 Landscape 16:9",
-        vertex_aspect_ratio="16:9",
+        aspect_ratio="16:9",
         runpod_width=1024,
         runpod_height=576,
     ),
     "square_1_1": VideoOrientationPreset(
         id="square_1_1",
         label="◼️ Square 1:1",
-        vertex_aspect_ratio="1:1",
+        aspect_ratio="1:1",
         runpod_width=768,
         runpod_height=768,
     ),
@@ -233,31 +233,24 @@ RUNPOD_REFERENCE_STRENGTH_PRESETS: dict[str, RunpodReferenceStrengthPreset] = {
 }
 
 IMAGE_PRESETS: dict[str, ImagePreset] = {
-    "imagen_square_jpeg": ImagePreset(
-        id="imagen_square_jpeg",
-        label="🖼️ Imagen square JPEG",
-        model="imagen-4.0-fast-generate-001",
-        aspect_ratio="1:1",
-        output_mime_type="image/jpeg",
-    ),
-    "imagen_landscape_jpeg": ImagePreset(
-        id="imagen_landscape_jpeg",
-        label="🌄 Imagen landscape JPEG",
-        model="imagen-4.0-fast-generate-001",
-        aspect_ratio="16:9",
-        output_mime_type="image/jpeg",
-    ),
-    "gemini_reference_square_jpeg": ImagePreset(
-        id="gemini_reference_square_jpeg",
+    "gemini_square_jpeg": ImagePreset(
+        id="gemini_square_jpeg",
         label="✨ Gemini square JPEG",
-        model="gemini-3-pro-image-preview",
+        model="gemini-3.1-flash-image",
         aspect_ratio="1:1",
+        output_mime_type="image/jpeg",
+    ),
+    "gemini_landscape_jpeg": ImagePreset(
+        id="gemini_landscape_jpeg",
+        label="🌄 Gemini landscape JPEG",
+        model="gemini-3.1-flash-image",
+        aspect_ratio="16:9",
         output_mime_type="image/jpeg",
     ),
     "gemini_portrait_jpeg": ImagePreset(
         id="gemini_portrait_jpeg",
         label="📱 Gemini portrait JPEG",
-        model="gemini-3-pro-image-preview",
+        model="gemini-3.1-flash-image",
         aspect_ratio="9:16",
         output_mime_type="image/jpeg",
     ),
@@ -316,6 +309,8 @@ MENU_TYPES = {"main", "video", *SETTABLE_PREFERENCE_TYPES}
 
 
 def video_provider_preset_for(preset_id: str | None) -> VideoProviderPreset | None:
+    if preset_id == "vertex":
+        preset_id = "gemini"
     return _preset_or_none(VIDEO_PROVIDER_PRESETS, preset_id)
 
 
@@ -366,6 +361,13 @@ def fal_video_model_presets_for(settings: _Settings) -> dict[str, FalVideoModelP
 
 
 def image_preset_for(preset_id: str | None) -> ImagePreset | None:
+    legacy_map = {
+        "imagen_square_jpeg": "gemini_square_jpeg",
+        "imagen_landscape_jpeg": "gemini_landscape_jpeg",
+        "gemini_reference_square_jpeg": "gemini_square_jpeg",
+    }
+    if preset_id in legacy_map:
+        preset_id = legacy_map[preset_id]
     return _preset_or_none(IMAGE_PRESETS, preset_id)
 
 

@@ -4,7 +4,7 @@ import asyncio
 import logging
 import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
@@ -13,6 +13,7 @@ from app.domain.commands import (
     ACCESS_DENIED_TEXT,
     EMPTY_TEXT_TEXT,
     GENERIC_FAILURE_TEXT,
+    IMAGE_GENERATION_QUEUED_TEXT,
     IMAGE_GENERATION_NOT_CONFIGURED_TEXT,
     IMAGE_REFERENCE_REQUIRES_GEMINI_TEXT,
     IMAGE_GENERATION_RETRY_TEXT,
@@ -22,13 +23,16 @@ from app.domain.commands import (
     VIDEO_GENERATION_NOT_CONFIGURED_TEXT,
     VIDEO_GENERATION_QUEUED_TEXT,
     VIDEO_GENERATION_RETRY_TEXT,
-    VIDEO_LTX_PROMPT_REQUIRED_TEXT,
     VIDEO_PROMPT_REQUIRED_TEXT,
     UNSUPPORTED_MESSAGE_TEXT,
     render_help_message,
     render_reset_message,
     render_start_message,
     render_status_message,
+)
+from app.domain.job_payloads import (
+    serialize_image_generation_request,
+    serialize_video_generation_request,
 )
 from app.domain.errors import (
     DraftRateLimitedError,
@@ -43,6 +47,7 @@ from app.domain.models import (
     ConversationRecord,
     GeneratedImageResult,
     ImageGenerationRequest,
+    ImageInput,
     InboundMessage,
     PreferenceType,
     ProviderRequest,
@@ -75,11 +80,6 @@ from app.observability import (
     estimate_video_usage,
 )
 from app.providers.base import AIProvider, ImageGenerator, VideoGenerator
-from app.providers.vertex_image_models import (
-    image_generation_api_method,
-    is_gemini_image_model,
-    requires_global_location,
-)
 from app.storage.conversations import ConversationRepository
 from app.storage.generation_jobs import GenerationJobRepository
 from app.storage.generated_images import GeneratedImageRepository
@@ -546,8 +546,8 @@ class ChatService:
             reply_text = render_status_message(
                 update_mode=self.settings.app_update_mode,
                 chat_model=self.settings.openai_model,
-                image_generation_enabled=self.settings.vertex_image_generation_enabled,
-                image_model=self.settings.vertex_image_model,
+                image_generation_enabled=self.settings.gemini_image_generation_enabled,
+                image_model=self.settings.gemini_image_model,
                 video_generation_enabled=self.settings.video_generation_enabled,
                 video_model=self._video_status_model(),
                 memory_enabled=self.settings.bot_history_max_turns > 0,
@@ -575,10 +575,8 @@ class ChatService:
             return await self._handle_image_command(
                 conversation=conversation,
                 message=message,
-                responder=responder,
-                active_run=active_run,
             )
-        elif command in {"/video", "/video_ltx"}:
+        elif command == "/video":
             return await self._handle_video_command(
                 conversation=conversation,
                 message=message,
@@ -596,8 +594,6 @@ class ChatService:
         *,
         conversation: ConversationRecord,
         message: InboundMessage,
-        responder: ResponseEmitter | None,
-        active_run: _ActiveRun,
     ) -> ServiceReply:
         prompt = self._extract_image_prompt(message)
         if prompt is None:
@@ -610,13 +606,7 @@ class ChatService:
 
         await self._persist_user_command_message(conversation, message)
 
-        if responder is None:
-            reply_text = GENERIC_FAILURE_TEXT
-            await self._persist_command_reply(conversation, reply_text)
-            await self.conversations.touch(conversation.id)
-            return ServiceReply(text=reply_text)
-
-        if self.image_generator is None or self.generated_images is None:
+        if self.image_generator is None or self.generation_jobs is None:
             await self._persist_command_reply(
                 conversation,
                 IMAGE_GENERATION_NOT_CONFIGURED_TEXT,
@@ -634,94 +624,49 @@ class ChatService:
             if image_preference is not None
             else None
         )
-        image_model = image_preset.model if image_preset else self.settings.vertex_image_model
+        image_model = image_preset.model if image_preset else self.settings.gemini_image_model
         image_aspect_ratio = (
             image_preset.aspect_ratio
             if image_preset
-            else self.settings.vertex_image_aspect_ratio
+            else self.settings.gemini_image_aspect_ratio
         )
         image_output_mime_type = (
             image_preset.output_mime_type
             if image_preset
-            else self.settings.vertex_image_output_mime_type
+            else self.settings.gemini_image_output_mime_type
         )
 
-        if message.image is not None and not is_gemini_image_model(image_model):
-            await self._persist_command_reply(
-                conversation,
-                IMAGE_REFERENCE_REQUIRES_GEMINI_TEXT,
-            )
-            await self.conversations.touch(conversation.id)
-            return ServiceReply(text=IMAGE_REFERENCE_REQUIRES_GEMINI_TEXT)
-
-        try:
-            generated_image = await self.image_generator.generate_image(
-                ImageGenerationRequest(
-                    chat_id=message.chat_id,
-                    user_id=message.user_id,
-                    prompt=prompt,
-                    model=image_model,
-                    aspect_ratio=image_aspect_ratio,
-                    output_mime_type=image_output_mime_type,
-                    reference_image=message.image,
-                )
-            )
-        except (ProviderTimeoutError, ProviderUpstreamError):
-            self.logger.warning(
-                log_kv(
-                    "image_generation_failed",
-                    update_id=message.update_id,
-                    chat_id=message.chat_id,
-                    user_id=message.user_id,
-                    provider="vertex",
-                    model=image_model,
-                    location=self.settings.vertex_location,
-                    api_method=image_generation_api_method(
-                        image_model
-                    ),
-                    required_location=(
-                        "global"
-                        if requires_global_location(image_model)
-                        else None
-                    ),
-                ),
-                exc_info=True,
-            )
-            await self._persist_command_reply(conversation, IMAGE_GENERATION_RETRY_TEXT)
-            await self.conversations.touch(conversation.id)
-            return ServiceReply(text=IMAGE_GENERATION_RETRY_TEXT)
-
-        if active_run.cancelled.is_set():
-            raise _SupersededResponse()
-
-        sent_photo = await responder.send_photo(generated_image)
-        await self._persist_generated_image_delivery(
-            conversation=conversation,
-            generated_image=generated_image,
-            sent_photo=sent_photo,
+        request = ImageGenerationRequest(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            prompt=prompt,
+            model=image_model,
+            aspect_ratio=image_aspect_ratio,
+            output_mime_type=image_output_mime_type,
+            reference_image=self._queue_safe_reference_image(message.image),
         )
+        await self.generation_jobs.add_image_job(
+            conversation_id=conversation.id,
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            prompt_text=prompt,
+            provider="gemini",
+            model=image_model,
+            operation_name=self._queued_job_handle("image", message),
+            request_payload=serialize_image_generation_request(request),
+            created_at=message.sent_at,
+        )
+        await self._persist_command_reply(conversation, IMAGE_GENERATION_QUEUED_TEXT)
         await self.conversations.touch(conversation.id)
         usage_fields = estimate_image_usage(
             prompt=prompt,
             generated_images=1,
-            cost_per_image_usd=self.settings.vertex_image_cost_per_image_usd,
-        )
-        usage_fields.update(
-            {
-                "api_method": image_generation_api_method(
-                    image_model
-                ),
-                "mime_type": generated_image.mime_type,
-                "telegram_message_id": sent_photo.telegram_message_id,
-                "telegram_file_id": sent_photo.telegram_file_id,
-                "file_size": sent_photo.file_size,
-            }
+            cost_per_image_usd=self.settings.gemini_image_cost_per_image_usd,
         )
         return ServiceReply(
-            text="",
-            delivered=True,
+            text=IMAGE_GENERATION_QUEUED_TEXT,
             usage_fields=usage_fields,
-            provider="vertex",
+            provider="gemini",
             model=image_model,
         )
 
@@ -733,17 +678,12 @@ class ChatService:
     ) -> ServiceReply:
         prompt = self._extract_video_prompt(message)
         if prompt is None:
-            prompt_required_text = (
-                VIDEO_LTX_PROMPT_REQUIRED_TEXT
-                if (message.command or "").lower() == "/video_ltx"
-                else VIDEO_PROMPT_REQUIRED_TEXT
-            )
             await self._persist_command_exchange(
                 conversation,
                 message,
-                prompt_required_text,
+                VIDEO_PROMPT_REQUIRED_TEXT,
             )
-            return ServiceReply(text=prompt_required_text)
+            return ServiceReply(text=VIDEO_PROMPT_REQUIRED_TEXT)
 
         if self.video_generator is None or self.generation_jobs is None:
             await self._persist_command_exchange(
@@ -826,15 +766,10 @@ class ChatService:
             if reference_strength_preference is not None
             else None
         )
-        command_forces_runpod = (message.command or "").lower() == "/video_ltx"
         provider_hint = (
-            "runpod"
-            if command_forces_runpod
-            else (
-                video_provider_preset.provider_hint
-                if video_provider_preset is not None
-                else "auto"
-            )
+            video_provider_preset.provider_hint
+            if video_provider_preset is not None
+            else "auto"
         )
         requested_provider = (
             self.settings.video_provider_order[0]
@@ -897,9 +832,9 @@ class ChatService:
             requested_model = self._video_model_for_provider(requested_provider)
 
         requested_aspect_ratio = (
-            orientation_preset.vertex_aspect_ratio
+            orientation_preset.aspect_ratio
             if orientation_preset is not None
-            else self.settings.vertex_video_aspect_ratio
+            else self.settings.gemini_video_aspect_ratio
         )
         requested_duration_seconds = (
             duration_preset.duration_seconds
@@ -945,7 +880,6 @@ class ChatService:
                 provider_hint=provider_hint,
                 model=requested_model,
                 aspect_ratio=requested_aspect_ratio,
-                output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
                 runpod_width=requested_width,
                 runpod_height=requested_height,
                 runpod_pipeline=requested_pipeline,
@@ -956,50 +890,25 @@ class ChatService:
                 **usage_fields,
             )
         )
-        try:
-            submitted_job = await self.video_generator.submit_video(
-                VideoGenerationRequest(
-                    chat_id=message.chat_id,
-                    user_id=message.user_id,
-                    prompt=prompt,
-                    model=requested_model,
-                    aspect_ratio=requested_aspect_ratio,
-                    duration_seconds=requested_duration_seconds,
-                    output_gcs_uri=self.settings.vertex_video_output_gcs_uri,
-                    reference_image=message.image,
-                    provider_hint=provider_hint,
-                    width=requested_width,
-                    height=requested_height,
-                    frame_rate=requested_frame_rate,
-                    pipeline=requested_pipeline,
-                    num_inference_steps=requested_num_inference_steps,
-                    seed=requested_seed,
-                    image_strength=requested_image_strength,
-                    model_locked=model_locked,
-                    resolution=requested_resolution,
-                )
-            )
-        except (ProviderTimeoutError, ProviderUpstreamError) as exc:
-            self.logger.warning(
-                log_kv(
-                    "provider_failure",
-                    update_id=message.update_id,
-                    chat_id=message.chat_id,
-                    user_id=message.user_id,
-                    message_type=message.message_type,
-                    provider=requested_provider,
-                    model=requested_model,
-                    error_type=type(exc).__name__,
-                ),
-                exc_info=True,
-            )
-            await self._persist_command_reply(conversation, VIDEO_GENERATION_RETRY_TEXT)
-            await self.conversations.touch(conversation.id)
-            return ServiceReply(
-                text=VIDEO_GENERATION_RETRY_TEXT,
-                provider=requested_provider,
-                model=requested_model,
-            )
+        request = VideoGenerationRequest(
+            chat_id=message.chat_id,
+            user_id=message.user_id,
+            prompt=prompt,
+            model=requested_model,
+            aspect_ratio=requested_aspect_ratio,
+            duration_seconds=requested_duration_seconds,
+            reference_image=self._queue_safe_reference_image(message.image),
+            provider_hint=provider_hint,
+            width=requested_width,
+            height=requested_height,
+            frame_rate=requested_frame_rate,
+            pipeline=requested_pipeline,
+            num_inference_steps=requested_num_inference_steps,
+            seed=requested_seed,
+            image_strength=requested_image_strength,
+            model_locked=model_locked,
+            resolution=requested_resolution,
+        )
 
         self.logger.info(
             log_kv(
@@ -1007,9 +916,8 @@ class ChatService:
                 update_id=message.update_id,
                 chat_id=message.chat_id,
                 user_id=message.user_id,
-                provider=submitted_job.provider,
-                operation_name=submitted_job.operation_name,
-                model=submitted_job.raw_model,
+                provider=requested_provider,
+                model=requested_model,
             )
         )
 
@@ -1018,10 +926,11 @@ class ChatService:
             chat_id=message.chat_id,
             user_id=message.user_id,
             prompt_text=prompt,
-            provider=submitted_job.provider,
-            model=submitted_job.raw_model,
-            operation_name=submitted_job.operation_name,
+            provider=requested_provider,
+            model=requested_model,
+            operation_name=self._queued_job_handle("video", message),
             duration_seconds=requested_duration_seconds,
+            request_payload=serialize_video_generation_request(request),
             created_at=message.sent_at,
         )
         await self._persist_command_reply(conversation, VIDEO_GENERATION_QUEUED_TEXT)
@@ -1029,13 +938,13 @@ class ChatService:
         usage_fields = estimate_video_usage(
             prompt=prompt,
             duration_seconds=requested_duration_seconds,
-            cost_per_second_usd=self._video_cost_for_provider(submitted_job.provider),
+            cost_per_second_usd=self._video_cost_for_provider(requested_provider),
         )
         return ServiceReply(
             text=VIDEO_GENERATION_QUEUED_TEXT,
             usage_fields=usage_fields,
-            provider=submitted_job.provider,
-            model=submitted_job.raw_model,
+            provider=requested_provider,
+            model=requested_model,
         )
 
     async def _persist_command_exchange(
@@ -1327,10 +1236,8 @@ class ChatService:
 
     def _provider_context(self, message: InboundMessage) -> tuple[str | None, str | None]:
         if self._is_image_command(message):
-            return ("vertex", self.settings.vertex_image_model)
+            return ("gemini", self.settings.gemini_image_model)
         if self._is_video_command(message):
-            if (message.command or "").lower() == "/video_ltx":
-                return ("runpod", self._video_model_for_provider("runpod"))
             first_provider = self.settings.video_provider_order[0]
             return (first_provider, self._video_model_for_provider(first_provider))
         if message.message_type != "command":
@@ -1344,41 +1251,53 @@ class ChatService:
         )
 
     def _is_video_command(self, message: InboundMessage) -> bool:
-        return message.message_type == "command" and (message.command or "").lower() in {
-            "/video",
-            "/video_ltx",
-        }
+        return (
+            message.message_type == "command"
+            and (message.command or "").lower() == "/video"
+        )
+
+    def _queued_job_handle(self, job_type: str, message: InboundMessage) -> str:
+        return (
+            f"queued:{job_type}:{message.chat_id}:{message.telegram_message_id}:"
+            f"{message.update_id}"
+        )
+
+    @staticmethod
+    def _queue_safe_reference_image(image: ImageInput | None) -> ImageInput | None:
+        if image is None:
+            return None
+        return replace(image, bytes_b64=None)
 
     def _video_model_for_provider(self, provider: str) -> str:
         if provider == "runpod":
             return self.settings.runpod_video_model
         if provider == "fal":
             return self.settings.fal_video_model
-        return self.settings.vertex_video_model
+        return self.settings.gemini_video_model
 
     def _video_cost_for_provider(self, provider: str) -> float:
         if provider == "runpod":
             return self.settings.runpod_video_cost_per_second_usd
         if provider == "fal":
             return self.settings.fal_video_cost_per_second_usd
-        return self.settings.vertex_video_cost_per_second_usd
+        return self.settings.gemini_video_cost_per_second_usd
 
     def _video_duration_for_provider(self, provider: str) -> int | None:
         if provider == "runpod":
             return self.settings.runpod_video_duration_seconds
         if provider == "fal":
-            return self.settings.vertex_video_duration_seconds
-        return self.settings.vertex_video_duration_seconds
+            return self.settings.gemini_video_duration_seconds
+        return self.settings.gemini_video_duration_seconds
 
     def _video_status_model(self) -> str:
         enabled_models: list[str] = []
-        if self.settings.vertex_video_generation_enabled:
-            enabled_models.append(f"vertex:{self.settings.vertex_video_model}")
+        if self.settings.gemini_video_generation_enabled:
+            enabled_models.append(f"gemini:{self.settings.gemini_video_model}")
         if self.settings.runpod_video_generation_enabled:
             enabled_models.append(f"runpod:{self.settings.runpod_video_model}")
         if self.settings.fal_video_generation_enabled:
             enabled_models.append(f"fal:{self.settings.fal_video_model}")
-        return ", ".join(enabled_models) or self.settings.vertex_video_model
+        return ", ".join(enabled_models) or self.settings.gemini_video_model
 
     def _drafts_enabled(
         self,
