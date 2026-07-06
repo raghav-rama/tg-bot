@@ -8,8 +8,8 @@ MessageType = Literal["text", "image", "command"]
 Role = Literal["user", "assistant"]
 ChatType = Literal["private", "group", "supergroup", "channel"]
 GenerationJobStatus = Literal["queued", "running", "completed", "failed"]
-VideoProviderName = Literal["vertex", "runpod", "fal"]
-VideoProviderHint = Literal["auto", "vertex", "runpod", "fal"]
+VideoProviderName = Literal["gemini", "runpod", "fal"]
+VideoProviderHint = Literal["auto", "gemini", "runpod", "fal"]
 FalVideoModelFamily = Literal["kling", "seedance", "gemini"]
 PreferenceType = Literal[
     "video",
@@ -33,8 +33,8 @@ class ImageInput:
     mime_type: str
     width: int
     height: int
-    byte_size: int
-    bytes_b64: str
+    byte_size: int | None
+    bytes_b64: str | None
     caption: str | None
 
 
@@ -168,6 +168,30 @@ class GeneratedImageResult:
 
 
 @dataclass(slots=True)
+class ImageGenerationPollRequest:
+    operation_name: str
+    prompt: str
+    model: str
+    provider: str
+    output_mime_type: str
+
+
+@dataclass(slots=True)
+class SubmittedImageJob:
+    operation_name: str
+    provider: str
+    raw_model: str
+
+
+@dataclass(slots=True)
+class ImageJobPollResult:
+    status: Literal["running", "completed", "failed"]
+    operation_name: str
+    generated_image: GeneratedImageResult | None = None
+    failure_reason: str | None = None
+
+
+@dataclass(slots=True)
 class SentPhoto:
     telegram_message_id: int
     telegram_file_id: str
@@ -202,7 +226,7 @@ class VideoGenerationRequest:
     model: str
     aspect_ratio: str
     duration_seconds: int | None
-    output_gcs_uri: str | None
+    output_gcs_uri: str | None = None
     reference_image: ImageInput | None = None
     provider_hint: VideoProviderHint = "auto"
     width: int | None = None
@@ -278,6 +302,8 @@ class StoredGenerationJob:
     provider: str
     model: str
     operation_name: str
+    provider_operation_name: str | None
+    request_payload: str | None
     output_uri: str | None
     mime_type: str | None
     telegram_message_id: int | None

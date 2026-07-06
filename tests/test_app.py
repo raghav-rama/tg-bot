@@ -84,20 +84,20 @@ def _build_webhook_settings(tmp_path) -> Settings:
     )
 
 
-def test_create_app_passes_vertex_image_timeout_to_provider(
+def test_create_app_passes_gemini_image_timeout_to_provider(
     monkeypatch,
     tmp_path,
 ) -> None:
     captured: dict[str, object] = {}
 
-    class FakeVertexImageProvider:
+    class FakeGeminiImageProvider:
         def __init__(self, **kwargs) -> None:
             captured.update(kwargs)
 
         async def close(self) -> None:
             return None
 
-    class FakeVertexVideoProvider:
+    class FakeGeminiVideoProvider:
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
 
@@ -116,8 +116,8 @@ def test_create_app_passes_vertex_image_timeout_to_provider(
         self._webhook_url = url
         self._last_error = None
 
-    monkeypatch.setattr(app_main, "VertexImageProvider", FakeVertexImageProvider)
-    monkeypatch.setattr(app_main, "VertexVideoProvider", FakeVertexVideoProvider)
+    monkeypatch.setattr(app_main, "GeminiImageProvider", FakeGeminiImageProvider)
+    monkeypatch.setattr(app_main, "GeminiVideoProvider", FakeGeminiVideoProvider)
     monkeypatch.setattr(TelegramRuntime, "configure_webhook", fake_configure_webhook)
 
     settings = Settings(
@@ -129,8 +129,8 @@ def test_create_app_passes_vertex_image_timeout_to_provider(
         TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
         TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
         SQLITE_PATH=str(tmp_path / "bot.db"),
-        VERTEX_API_KEY="vertex-test-key",
-        VERTEX_IMAGE_TIMEOUT_SECONDS="180",
+        GEMINI_API_KEY="gemini-test-key",
+        GEMINI_IMAGE_TIMEOUT_SECONDS="180",
     )
 
     with TestClient(create_app(settings)) as client:

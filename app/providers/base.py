@@ -7,8 +7,11 @@ from app.domain.models import (
     GeneratedImageResult,
     GeneratedVideoResult,
     ImageGenerationRequest,
+    ImageGenerationPollRequest,
+    ImageJobPollResult,
     ProviderRequest,
     ProviderResponse,
+    SubmittedImageJob,
     SubmittedVideoJob,
     StreamingProviderEvent,
     VideoGenerationPollRequest,
@@ -32,6 +35,18 @@ class AIProvider(Protocol):
 
 
 class ImageGenerator(Protocol):
+    async def submit_image(
+        self,
+        request: ImageGenerationRequest,
+    ) -> SubmittedImageJob:
+        """Submit a normalized long-running image generation job."""
+
+    async def poll_image(
+        self,
+        request: ImageGenerationPollRequest,
+    ) -> ImageJobPollResult:
+        """Poll a previously submitted image generation job."""
+
     async def generate_image(
         self,
         request: ImageGenerationRequest,

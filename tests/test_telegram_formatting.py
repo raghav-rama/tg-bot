@@ -121,7 +121,7 @@ async def test_response_emitter_passes_video_metadata_and_timeout() -> None:
         GeneratedVideoResult(
             video_bytes=b"video-bytes",
             mime_type="video/mp4",
-            provider="vertex",
+            provider="gemini",
             raw_model="veo-3.1-fast-generate-001",
             prompt="vertical city pan",
             output_uri="gs://bucket/video.mp4",

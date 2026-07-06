@@ -46,7 +46,7 @@ def make_request(*, provider_hint: str = "auto", model: str | None = None) -> Vi
         chat_id=1,
         user_id=42,
         prompt="tracking shot through a glowing cave",
-        model=model or "veo-3.0-fast-generate-001",
+        model=model or "gemini-omni-flash-preview",
         aspect_ratio="9:16",
         duration_seconds=4,
         output_gcs_uri=None,
@@ -55,38 +55,38 @@ def make_request(*, provider_hint: str = "auto", model: str | None = None) -> Vi
 
 
 @pytest.mark.asyncio
-async def test_auto_video_uses_vertex_when_vertex_accepts() -> None:
-    vertex = FakeVideoProvider(provider="vertex")
+async def test_auto_video_uses_gemini_when_gemini_accepts() -> None:
+    vertex = FakeVideoProvider(provider="gemini")
     runpod = FakeVideoProvider(provider="runpod")
     router = VideoProviderRouter(
-        providers={"vertex": vertex, "runpod": runpod},
-        provider_order=("vertex", "runpod"),
+        providers={"gemini": vertex, "runpod": runpod},
+        provider_order=("gemini", "runpod"),
         provider_models={
-            "vertex": "veo-3.0-fast-generate-001",
+            "gemini": "gemini-omni-flash-preview",
             "runpod": "ltx-2.3-22b-distilled-1.1",
         },
     )
 
     submitted = await router.submit_video(make_request())
 
-    assert submitted.provider == "vertex"
-    assert vertex.submit_calls[0].provider_hint == "vertex"
-    assert vertex.submit_calls[0].model == "veo-3.0-fast-generate-001"
+    assert submitted.provider == "gemini"
+    assert vertex.submit_calls[0].provider_hint == "gemini"
+    assert vertex.submit_calls[0].model == "gemini-omni-flash-preview"
     assert runpod.submit_calls == []
 
 
 @pytest.mark.asyncio
-async def test_auto_video_falls_back_to_runpod_on_vertex_safety_error() -> None:
+async def test_auto_video_falls_back_to_runpod_on_gemini_safety_error() -> None:
     vertex = FakeVideoProvider(
-        provider="vertex",
-        error=ProviderSafetyError("Vertex rejected the video prompt as unsafe"),
+        provider="gemini",
+        error=ProviderSafetyError("Gemini rejected the video prompt as unsafe"),
     )
     runpod = FakeVideoProvider(provider="runpod")
     router = VideoProviderRouter(
-        providers={"vertex": vertex, "runpod": runpod},
-        provider_order=("vertex", "runpod"),
+        providers={"gemini": vertex, "runpod": runpod},
+        provider_order=("gemini", "runpod"),
         provider_models={
-            "vertex": "veo-3.0-fast-generate-001",
+            "gemini": "gemini-omni-flash-preview",
             "runpod": "ltx-2.3-22b-distilled-1.1",
         },
     )
@@ -99,17 +99,17 @@ async def test_auto_video_falls_back_to_runpod_on_vertex_safety_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_auto_video_does_not_fallback_to_runpod_when_excluded_from_order() -> None:
+async def test_auto_video_does_not_fallback_when_no_next_provider_is_available() -> None:
     vertex = FakeVideoProvider(
-        provider="vertex",
-        error=ProviderSafetyError("Vertex rejected the video prompt as unsafe"),
+        provider="gemini",
+        error=ProviderSafetyError("Gemini rejected the video prompt as unsafe"),
     )
     runpod = FakeVideoProvider(provider="runpod")
     router = VideoProviderRouter(
-        providers={"vertex": vertex, "runpod": runpod},
-        provider_order=("vertex", "fal"),
+        providers={"gemini": vertex, "runpod": runpod},
+        provider_order=("gemini", "fal"),
         provider_models={
-            "vertex": "veo-3.0-fast-generate-001",
+            "gemini": "gemini-omni-flash-preview",
             "runpod": "ltx-2.3-22b-distilled-1.1",
             "fal": "fal-ai/kling-video/v3/standard/text-to-video",
         },
@@ -127,13 +127,13 @@ async def test_auto_video_does_not_fallback_on_timeout_or_generic_errors() -> No
         ProviderTimeoutError("timed out"),
         ProviderUpstreamError("quota exhausted"),
     ):
-        vertex = FakeVideoProvider(provider="vertex", error=error)
+        vertex = FakeVideoProvider(provider="gemini", error=error)
         runpod = FakeVideoProvider(provider="runpod")
         router = VideoProviderRouter(
-            providers={"vertex": vertex, "runpod": runpod},
-            provider_order=("vertex", "runpod"),
+            providers={"gemini": vertex, "runpod": runpod},
+            provider_order=("gemini", "runpod"),
             provider_models={
-                "vertex": "veo-3.0-fast-generate-001",
+                "gemini": "gemini-omni-flash-preview",
                 "runpod": "ltx-2.3-22b-distilled-1.1",
             },
         )
@@ -146,13 +146,13 @@ async def test_auto_video_does_not_fallback_on_timeout_or_generic_errors() -> No
 
 @pytest.mark.asyncio
 async def test_video_ltx_hint_submits_directly_to_runpod() -> None:
-    vertex = FakeVideoProvider(provider="vertex")
+    vertex = FakeVideoProvider(provider="gemini")
     runpod = FakeVideoProvider(provider="runpod")
     router = VideoProviderRouter(
-        providers={"vertex": vertex, "runpod": runpod},
-        provider_order=("vertex", "runpod"),
+        providers={"gemini": vertex, "runpod": runpod},
+        provider_order=("gemini", "runpod"),
         provider_models={
-            "vertex": "veo-3.0-fast-generate-001",
+            "gemini": "gemini-omni-flash-preview",
             "runpod": "ltx-2.3-22b-distilled-1.1",
         },
     )
@@ -166,13 +166,13 @@ async def test_video_ltx_hint_submits_directly_to_runpod() -> None:
 
 @pytest.mark.asyncio
 async def test_poll_video_delegates_to_persisted_provider() -> None:
-    vertex = FakeVideoProvider(provider="vertex")
+    vertex = FakeVideoProvider(provider="gemini")
     runpod = FakeVideoProvider(provider="runpod")
     router = VideoProviderRouter(
-        providers={"vertex": vertex, "runpod": runpod},
-        provider_order=("vertex", "runpod"),
+        providers={"gemini": vertex, "runpod": runpod},
+        provider_order=("gemini", "runpod"),
         provider_models={
-            "vertex": "veo-3.0-fast-generate-001",
+            "gemini": "gemini-omni-flash-preview",
             "runpod": "ltx-2.3-22b-distilled-1.1",
         },
     )
@@ -193,14 +193,14 @@ async def test_poll_video_delegates_to_persisted_provider() -> None:
 
 @pytest.mark.asyncio
 async def test_fal_hint_submits_directly_to_fal() -> None:
-    vertex = FakeVideoProvider(provider="vertex")
+    vertex = FakeVideoProvider(provider="gemini")
     runpod = FakeVideoProvider(provider="runpod")
     fal = FakeVideoProvider(provider="fal")
     router = VideoProviderRouter(
-        providers={"vertex": vertex, "runpod": runpod, "fal": fal},
-        provider_order=("vertex", "runpod", "fal"),
+        providers={"gemini": vertex, "runpod": runpod, "fal": fal},
+        provider_order=("gemini", "runpod", "fal"),
         provider_models={
-            "vertex": "veo-3.0-fast-generate-001",
+            "gemini": "gemini-omni-flash-preview",
             "runpod": "ltx-2.3-22b-distilled-1.1",
             "fal": "fal-ai/kling-video/v3/standard/text-to-video",
         },
@@ -217,18 +217,18 @@ async def test_fal_hint_submits_directly_to_fal() -> None:
 
 
 @pytest.mark.asyncio
-async def test_auto_video_does_not_fallback_to_fal_on_vertex_safety_error() -> None:
+async def test_auto_video_falls_back_to_next_provider_on_gemini_safety_error() -> None:
     vertex = FakeVideoProvider(
-        provider="vertex",
-        error=ProviderSafetyError("Vertex rejected the video prompt as unsafe"),
+        provider="gemini",
+        error=ProviderSafetyError("Gemini rejected the video prompt as unsafe"),
     )
     runpod = FakeVideoProvider(provider="runpod")
     fal = FakeVideoProvider(provider="fal")
     router = VideoProviderRouter(
-        providers={"vertex": vertex, "runpod": runpod, "fal": fal},
-        provider_order=("vertex", "fal", "runpod"),
+        providers={"gemini": vertex, "runpod": runpod, "fal": fal},
+        provider_order=("gemini", "fal", "runpod"),
         provider_models={
-            "vertex": "veo-3.0-fast-generate-001",
+            "gemini": "gemini-omni-flash-preview",
             "runpod": "ltx-2.3-22b-distilled-1.1",
             "fal": "fal-ai/kling-video/v3/standard/text-to-video",
         },
@@ -236,20 +236,20 @@ async def test_auto_video_does_not_fallback_to_fal_on_vertex_safety_error() -> N
 
     submitted = await router.submit_video(make_request())
 
-    assert submitted.provider == "runpod"
-    assert fal.submit_calls == []
-    assert runpod.submit_calls[0].model == "ltx-2.3-22b-distilled-1.1"
+    assert submitted.provider == "fal"
+    assert runpod.submit_calls == []
+    assert fal.submit_calls[0].model == "fal-ai/kling-video/v3/standard/text-to-video"
 
 
 @pytest.mark.asyncio
 async def test_auto_video_uses_fal_when_first_in_order() -> None:
-    vertex = FakeVideoProvider(provider="vertex")
+    vertex = FakeVideoProvider(provider="gemini")
     fal = FakeVideoProvider(provider="fal")
     router = VideoProviderRouter(
-        providers={"vertex": vertex, "fal": fal},
-        provider_order=("fal", "vertex"),
+        providers={"gemini": vertex, "fal": fal},
+        provider_order=("fal", "gemini"),
         provider_models={
-            "vertex": "veo-3.0-fast-generate-001",
+            "gemini": "gemini-omni-flash-preview",
             "fal": "fal-ai/kling-video/v3/standard/text-to-video",
         },
     )

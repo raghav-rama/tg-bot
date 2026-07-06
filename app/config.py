@@ -8,8 +8,6 @@ from urllib.parse import urlparse
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-from app.providers.vertex_image_models import requires_global_location
-
 
 class _FalModelFamilyHelper:
     """Helpers for mapping a concrete Fal endpoint to a family label."""
@@ -113,6 +111,48 @@ class Settings(BaseSettings):
         default=80,
         alias="BOT_DRAFT_MIN_CHARS_DELTA",
     )
+    gemini_api_key: SecretStr | None = Field(default=None, alias="GEMINI_API_KEY")
+    google_api_key: SecretStr | None = Field(default=None, alias="GOOGLE_API_KEY")
+    gemini_image_model: str = Field(
+        default="gemini-3.1-flash-image",
+        alias="GEMINI_IMAGE_MODEL",
+    )
+    gemini_image_aspect_ratio: str = Field(
+        default="1:1",
+        alias="GEMINI_IMAGE_ASPECT_RATIO",
+    )
+    gemini_image_output_mime_type: str = Field(
+        default="image/jpeg",
+        alias="GEMINI_IMAGE_OUTPUT_MIME_TYPE",
+    )
+    gemini_image_timeout_seconds: int = Field(
+        default=60,
+        alias="GEMINI_IMAGE_TIMEOUT_SECONDS",
+    )
+    gemini_image_cost_per_image_usd: float = Field(
+        default=0.0,
+        alias="GEMINI_IMAGE_COST_PER_IMAGE_USD",
+    )
+    gemini_video_model: str = Field(
+        default="gemini-omni-flash-preview",
+        alias="GEMINI_VIDEO_MODEL",
+    )
+    gemini_video_aspect_ratio: str = Field(
+        default="9:16",
+        alias="GEMINI_VIDEO_ASPECT_RATIO",
+    )
+    gemini_video_duration_seconds: int | None = Field(
+        default=4,
+        alias="GEMINI_VIDEO_DURATION_SECONDS",
+    )
+    gemini_video_timeout_seconds: int = Field(
+        default=180,
+        alias="GEMINI_VIDEO_TIMEOUT_SECONDS",
+    )
+    gemini_video_cost_per_second_usd: float = Field(
+        default=0.0,
+        alias="GEMINI_VIDEO_COST_PER_SECOND_USD",
+    )
     vertex_api_key: SecretStr | None = Field(default=None, alias="VERTEX_API_KEY")
     vertex_project_id: str | None = Field(default=None, alias="VERTEX_PROJECT_ID")
     vertex_location: str = Field(default="us-central1", alias="VERTEX_LOCATION")
@@ -157,7 +197,7 @@ class Settings(BaseSettings):
         alias="VERTEX_VIDEO_COST_PER_SECOND_USD",
     )
     video_provider_order: Annotated[tuple[str, ...], NoDecode] = Field(
-        default=("vertex", "runpod"),
+        default=("gemini", "runpod"),
         alias="VIDEO_PROVIDER_ORDER",
     )
     runpod_api_key: SecretStr | None = Field(default=None, alias="RUNPOD_API_KEY")
@@ -301,10 +341,15 @@ class Settings(BaseSettings):
         "vertex_image_model",
         "vertex_image_aspect_ratio",
         "vertex_image_output_mime_type",
+        "gemini_image_model",
+        "gemini_image_aspect_ratio",
+        "gemini_image_output_mime_type",
         "telegram_webhook_url",
         "vertex_video_model",
         "vertex_video_aspect_ratio",
         "vertex_video_output_gcs_uri",
+        "gemini_video_model",
+        "gemini_video_aspect_ratio",
         "runpod_video_endpoint_id",
         "runpod_video_base_url",
         "runpod_video_model",
@@ -322,7 +367,7 @@ class Settings(BaseSettings):
         normalized = value.strip()
         return normalized or None
 
-    @field_validator("telegram_webhook_secret_token", "runpod_api_key", "fal_key", mode="before")
+    @field_validator("telegram_webhook_secret_token", "gemini_api_key", "google_api_key", "runpod_api_key", "fal_key", mode="before")
     @classmethod
     def normalize_optional_secret(
         cls,
@@ -377,7 +422,9 @@ class Settings(BaseSettings):
             providers = tuple(
                 str(part).strip().lower() for part in value if str(part).strip()
             )
-        allowed = {"vertex", "runpod", "fal"}
+        alias_map = {"vertex": "gemini"}
+        providers = tuple(alias_map.get(provider, provider) for provider in providers)
+        allowed = {"gemini", "runpod", "fal"}
         if not providers:
             raise ValueError("VIDEO_PROVIDER_ORDER must include at least one provider")
         unknown = sorted(set(providers) - allowed)
@@ -393,6 +440,9 @@ class Settings(BaseSettings):
     @field_validator(
         "vertex_video_duration_seconds",
         "vertex_image_timeout_seconds",
+        "gemini_video_duration_seconds",
+        "gemini_image_timeout_seconds",
+        "gemini_video_timeout_seconds",
         "bot_video_max_bytes",
         "telegram_video_request_timeout_seconds",
         "video_job_poll_interval_seconds",
@@ -445,6 +495,8 @@ class Settings(BaseSettings):
         "openai_output_cost_per_1m_tokens_usd",
         "vertex_image_cost_per_image_usd",
         "vertex_video_cost_per_second_usd",
+        "gemini_image_cost_per_image_usd",
+        "gemini_video_cost_per_second_usd",
         "runpod_video_cost_per_second_usd",
         "fal_video_cost_per_second_usd",
     )
@@ -453,19 +505,6 @@ class Settings(BaseSettings):
         if value < 0:
             raise ValueError("cost estimate rates must be zero or greater")
         return value
-
-    @model_validator(mode="after")
-    def validate_vertex_image_model_location(self) -> Settings:
-        if (
-            self.vertex_image_generation_enabled
-            and requires_global_location(self.vertex_image_model)
-            and self.vertex_location != "global"
-        ):
-            raise ValueError(
-                "VERTEX_LOCATION must be 'global' when "
-                "VERTEX_IMAGE_MODEL is 'gemini-3-pro-image-preview'"
-            )
-        return self
 
     @model_validator(mode="after")
     def validate_webhook_mode_settings(self) -> Settings:
@@ -491,7 +530,7 @@ class Settings(BaseSettings):
                 "RUNPOD_API_KEY and RUNPOD_VIDEO_ENDPOINT_ID must be configured together"
             )
         if self.runpod_video_duration_seconds is None:
-            self.runpod_video_duration_seconds = self.vertex_video_duration_seconds
+            self.runpod_video_duration_seconds = self.gemini_video_duration_seconds
         return self
 
     @model_validator(mode="after")
@@ -513,6 +552,18 @@ class Settings(BaseSettings):
     @property
     def vertex_video_generation_enabled(self) -> bool:
         return self.vertex_api_key is not None or self.vertex_project_id is not None
+
+    @property
+    def google_media_api_key(self) -> SecretStr | None:
+        return self.gemini_api_key or self.google_api_key or self.vertex_api_key
+
+    @property
+    def gemini_image_generation_enabled(self) -> bool:
+        return self.google_media_api_key is not None
+
+    @property
+    def gemini_video_generation_enabled(self) -> bool:
+        return self.google_media_api_key is not None
 
     @property
     def runpod_video_generation_enabled(self) -> bool:
@@ -581,7 +632,7 @@ class Settings(BaseSettings):
     @property
     def video_generation_enabled(self) -> bool:
         enabled_by_provider = {
-            "vertex": self.vertex_video_generation_enabled,
+            "gemini": self.gemini_video_generation_enabled,
             "runpod": self.runpod_video_generation_enabled,
             "fal": self.fal_video_generation_enabled,
         }

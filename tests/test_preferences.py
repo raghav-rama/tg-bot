@@ -126,28 +126,32 @@ def test_presets_map_to_request_overrides() -> None:
     orientation_preset = video_orientation_preset_for("portrait_9_16")
     pipeline_preset = runpod_pipeline_preset_for("two_stage")
     quality_preset = runpod_quality_preset_for("high")
-    image_preset = image_preset_for("imagen_landscape_jpeg")
+    image_preset = image_preset_for("gemini_landscape_jpeg")
 
     assert provider_preset.provider_hint == "runpod"
     assert duration_preset.duration_seconds == 8
-    assert orientation_preset.vertex_aspect_ratio == "9:16"
+    assert orientation_preset.aspect_ratio == "9:16"
     assert orientation_preset.runpod_width == 576
     assert orientation_preset.runpod_height == 1024
     assert pipeline_preset.pipeline == "two_stage"
     assert pipeline_preset.model == "ltx-2.3-22b"
     assert quality_preset.num_inference_steps == 50
-    assert image_preset.model == "imagen-4.0-fast-generate-001"
+    assert image_preset.model == "gemini-3.1-flash-image"
     assert image_preset.aspect_ratio == "16:9"
     assert image_preset.output_mime_type == "image/jpeg"
 
 
 def test_video_provider_preset_includes_fal() -> None:
     fal_preset = video_provider_preset_for("fal")
+    gemini_preset = video_provider_preset_for("gemini")
     auto_preset = video_provider_preset_for("auto")
 
     assert fal_preset is not None
     assert fal_preset.provider_hint == "fal"
     assert "Fal" in fal_preset.label
+    assert gemini_preset is not None
+    assert gemini_preset.provider_hint == "gemini"
+    assert "Gemini" in gemini_preset.label
     assert auto_preset.provider_hint == "auto"
 
 
@@ -160,7 +164,7 @@ def test_image_settings_menu_has_clear_gemini_portrait_option() -> None:
     assert "📱 Gemini portrait JPEG" in labels
     assert all("reference" not in label.lower() for label in labels)
     assert gemini_portrait is not None
-    assert gemini_portrait.model == "gemini-3-pro-image-preview"
+    assert gemini_portrait.model == "gemini-3.1-flash-image"
     assert gemini_portrait.aspect_ratio == "9:16"
     assert gemini_portrait.output_mime_type == "image/jpeg"
 

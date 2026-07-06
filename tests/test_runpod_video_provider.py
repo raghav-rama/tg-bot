@@ -49,7 +49,7 @@ def make_reference_image(*, byte_size: int = 15) -> ImageInput:
         height=512,
         byte_size=byte_size,
         bytes_b64=base64.b64encode(b"reference-image").decode("ascii"),
-        caption="/video_ltx animate this",
+        caption="/video animate this",
     )
 
 

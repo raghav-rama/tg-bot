@@ -34,13 +34,8 @@ class TelegramUpdateProcessor:
         try:
             image_bytes = None
             reply_image_bytes = None
-            if message.photo:
+            if message.photo and not _is_reference_image_caption_command(message):
                 image_bytes = await download_largest_photo_bytes(bot, message)
-            elif _is_reference_image_reply_command(message):
-                reply_image_bytes = await download_largest_photo_bytes(
-                    bot,
-                    message.reply_to_message,
-                )
 
             inbound = normalize_message(
                 message=message,
@@ -144,11 +139,21 @@ def _is_reference_image_reply_command(message: Message) -> bool:
         return False
     if not getattr(reply_message, "photo", None):
         return False
-    stripped_text = message.text.strip()
-    if not stripped_text:
+    return _command_token(message.text) in {"/image", "/video"}
+
+
+def _is_reference_image_caption_command(message: Message) -> bool:
+    if not message.photo or message.caption is None:
         return False
+    return _command_token(message.caption) in {"/image", "/video"}
+
+
+def _command_token(text: str) -> str | None:
+    stripped_text = text.strip()
+    if not stripped_text:
+        return None
     token = stripped_text.split(maxsplit=1)[0]
     if not token.startswith("/"):
-        return False
+        return None
     command = token.split("@", maxsplit=1)[0].lower()
-    return command in {"/image", "/video", "/video_ltx"}
+    return command

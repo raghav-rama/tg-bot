@@ -1,5 +1,8 @@
 # Telegram Bot Architecture - Phase 2
 
+> Archived note: this document describes the original Vertex-based implementation that was later replaced by the Gemini Developer API media stack on `dev`. Use `README.md`, `AGENTS.md`, and `docs/roadmap.md` for the current implementation.
+
+
 ## Summary
 
 This document defines Phase 2 only.

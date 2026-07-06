@@ -1,6 +1,6 @@
 # tg-bot
 
-Private Telegram bot built with FastAPI, SQLite, OpenAI chat, Vertex AI image/video generation, Runpod LTX video fallback, and Fal video provider support.
+Private Telegram bot built with FastAPI, SQLite, OpenAI chat, Gemini Developer API image/video generation, Runpod video fallback, and Fal video provider support.
 
 ## Status
 
@@ -17,12 +17,11 @@ Implemented through Phase 4 and Phase 6:
 - SQLite-backed conversation memory and reset semantics
 - text chat and single-photo understanding through OpenAI
 - Telegram draft streaming for long-running text replies
-- `/image <prompt>` generation through Vertex AI and Telegram `sendPhoto`
-- `/video <prompt>` queued generation through Vertex AI, Runpod LTX fallback on Vertex safety rejections, or Fal video models
-- `/video_ltx <prompt>` queued generation directly through Runpod LTX for manual testing
+- `/image <prompt>` queued generation through the Gemini Developer API and later Telegram `sendPhoto` delivery
+- `/video <prompt>` queued generation through Gemini, with provider fallback and optional Fal/Runpod video providers
 - `/settings` inline-button presets for per-chat/per-user video provider, Fal model family (when multiple families are configured), video duration, aspect ratio, safe Runpod LTX, image, and chat request settings
-- SQLite-backed video jobs, background polling, and Telegram `sendVideo`
-- photo captions that start with `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>` use the photo as a transient reference image for generation; text commands can also reply to any Telegram photo to use that photo as the reference
+- SQLite-backed media jobs, background polling, and later Telegram `sendPhoto` / `sendVideo` delivery
+- photo captions that start with `/image <prompt>` or `/video <prompt>` use the photo as a transient reference image for generation; text commands can also reply to any Telegram photo to use that photo as the reference
 - log-only usage observability with production JSON logs, local text logs by default, and optional config-driven cost estimates for chat, image, and video generation
 - health and readiness endpoints plus automated tests
 
@@ -42,9 +41,9 @@ Inbound inputs:
 
 - plain text messages
 - one photo with an optional caption
-- one photo with a caption that starts with `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>`
-- text `/image`, `/video`, or `/video_ltx` commands that reply to one Telegram photo
-- commands: `/start`, `/help`, `/status`, `/reset`, `/settings`, `/image`, `/video`, `/video_ltx`
+- one photo with a caption that starts with `/image <prompt>` or `/video <prompt>`
+- text `/image` or `/video` commands that reply to one Telegram photo
+- commands: `/start`, `/help`, `/status`, `/reset`, `/settings`, `/image`, `/video`
 
 Outbound outputs:
 
@@ -59,12 +58,13 @@ Current constraints:
 - image-understanding requests use the final-only reply path by default
 - webhook mode requires a public HTTPS URL and validates `X-Telegram-Bot-Api-Secret-Token`
 - raw generated image and video bytes are not persisted in SQLite
-- raw reference photo bytes are transient request inputs and are not persisted in SQLite
-- live Telegram, Vertex, and Runpod verification still depends on real credentials and manual runtime checks
+- queued reference-photo jobs persist Telegram photo metadata plus `file_id`; raw reference photo bytes are re-downloaded by the worker when needed and are not persisted in SQLite
+- `/image` and `/video` both acknowledge immediately, persist a queued job, and deliver the final media later from the background worker
+- live Telegram, Gemini, Runpod, and Fal verification still depends on real credentials and manual runtime checks
 - generated video bytes remain transient in memory only, and URI-backed assets should rely on external bucket or object-storage lifecycle cleanup
-- Gemini image models use a separate preview path from Imagen; `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`
+- `/image` now uses current Gemini image-generation models for both prompt-only and reference-image flows
 - `/image` with a reference photo requires a Gemini image model; Imagen remains prompt-to-image only
-- `/video` falls back to Runpod only for classified Vertex safety rejections, not for timeout, quota, or generic upstream failures
+- `/video` falls back only on classified safety rejections; timeout, quota, and generic upstream failures do not trigger fallback
 
 ## Architecture At A Glance
 
@@ -73,9 +73,9 @@ The runtime is split so Telegram transport stays separate from domain and provid
 - `app/api/`: `healthz`, `readyz`, and webhook ingestion
 - `app/telegram/`: polling runtime, handlers, normalization, formatting, media delivery, and drafts
 - `app/domain/`: commands, models, interfaces, and orchestration in `ChatService`
-- `app/providers/`: OpenAI chat plus Vertex image/video, Runpod video, Fal video, and video provider routing adapters
+- `app/providers/`: OpenAI chat plus Gemini image/video, Runpod video, Fal video, and video provider routing adapters
 - `app/storage/`: SQLite schema and repositories for conversations, messages, generated images, generation jobs, and user preferences
-- `app/workers/`: background polling worker for queued video jobs
+- `app/workers/`: background polling worker for queued image and video jobs
 
 ## Requirements
 
@@ -83,8 +83,8 @@ The runtime is split so Telegram transport stays separate from domain and provid
 - `uv` for dependency management
 - a Telegram bot token
 - an OpenAI API key for chat replies
-- Vertex configuration for `/image` and default `/video`
-- optional Runpod configuration for `/video` fallback and `/video_ltx`
+- Gemini API key configuration for `/image` and default `/video`
+- optional Runpod configuration for `/video` fallback
 - optional Fal configuration for `/video` provider expansion
 
 ## Quick Start
@@ -122,22 +122,20 @@ OPENAI_TIMEOUT_SECONDS=45
 # OPENAI_INPUT_COST_PER_1M_TOKENS_USD=0
 # OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD=0
 
-# Optional Vertex configuration for /image and /video
-# For local testing, an API key is enough.
-VERTEX_API_KEY=your-vertex-api-key
-
-# For ADC / project-based auth, use these instead or in addition.
-# VERTEX_PROJECT_ID=your-gcp-project-id
-# VERTEX_LOCATION=us-central1
-# For Gemini 3 Pro Image preview, set:
-# VERTEX_IMAGE_MODEL=gemini-3-pro-image-preview
-# VERTEX_LOCATION=global
-# Reference-photo /image commands require a Gemini image model.
-
-# Optional log-only cost estimates; keep unset or 0 to disable.
-# VERTEX_IMAGE_COST_PER_IMAGE_USD=0
-# VERTEX_IMAGE_TIMEOUT_SECONDS=120
-# VERTEX_VIDEO_COST_PER_SECOND_USD=0
+# Optional Gemini configuration for /image and /video
+GEMINI_API_KEY=your-gemini-api-key
+# Or use GOOGLE_API_KEY instead.
+# GOOGLE_API_KEY=your-google-api-key
+# GEMINI_IMAGE_MODEL=gemini-3.1-flash-image
+# GEMINI_IMAGE_ASPECT_RATIO=1:1
+# GEMINI_IMAGE_OUTPUT_MIME_TYPE=image/jpeg
+# GEMINI_IMAGE_TIMEOUT_SECONDS=60
+# GEMINI_VIDEO_MODEL=gemini-omni-flash-preview
+# GEMINI_VIDEO_ASPECT_RATIO=9:16
+# GEMINI_VIDEO_DURATION_SECONDS=4
+# GEMINI_VIDEO_TIMEOUT_SECONDS=180
+# GEMINI_IMAGE_COST_PER_IMAGE_USD=0
+# GEMINI_VIDEO_COST_PER_SECOND_USD=0
 
 # Optional Fal video provider for /video
 # FAL_KEY=your-fal-api-key
@@ -147,7 +145,7 @@ VERTEX_API_KEY=your-vertex-api-key
 # FAL_VIDEO_RESOLUTION=720p
 # FAL_CLIENT_TIMEOUT_SECONDS=45
 
-# Optional Runpod LTX fallback for /video and manual /video_ltx
+# Optional Runpod configuration for /video fallback
 # RUNPOD_API_KEY=your-runpod-api-key
 # RUNPOD_VIDEO_ENDPOINT_ID=your-runpod-serverless-endpoint-id
 # RUNPOD_VIDEO_BASE_URL=https://api.runpod.ai/v2
@@ -162,10 +160,9 @@ VERTEX_API_KEY=your-vertex-api-key
 # RUNPOD_VIDEO_SIGNED_URL_TTL_SECONDS=3600
 # RUNPOD_VIDEO_COST_PER_SECOND_USD=0
 
-# Example video provider order. Default is "vertex,runpod".
+# Example video provider order. Default is "gemini,runpod".
 # Add "fal" only when FAL_KEY is configured, e.g.:
-# VIDEO_PROVIDER_ORDER=vertex,runpod,fal
-# VERTEX_VIDEO_ASPECT_RATIO=9:16
+# VIDEO_PROVIDER_ORDER=gemini,runpod,fal
 # RUNPOD_VIDEO_ENDPOINT_ID=your-runpod-serverless-endpoint-id
 # RUNPOD_VIDEO_BASE_URL=https://api.runpod.ai/v2
 # RUNPOD_VIDEO_MODEL=ltx-2.3-22b-distilled-1.1
@@ -223,36 +220,32 @@ Draft streaming settings:
 - `BOT_DRAFT_UPDATE_INTERVAL_MS`
 - `BOT_DRAFT_MIN_CHARS_DELTA`
 
-Vertex image settings:
+Gemini image settings:
 
-- `VERTEX_API_KEY`
-- `VERTEX_PROJECT_ID`
-- `VERTEX_LOCATION`
-- `VERTEX_IMAGE_MODEL`
-- `VERTEX_IMAGE_ASPECT_RATIO`
-- `VERTEX_IMAGE_OUTPUT_MIME_TYPE`
-- `VERTEX_IMAGE_TIMEOUT_SECONDS`: `/image` provider timeout in seconds, default `120`
-- `VERTEX_IMAGE_COST_PER_IMAGE_USD`: optional log-only estimate rate, default `0`
+- `GEMINI_API_KEY` or `GOOGLE_API_KEY`
+- `GEMINI_IMAGE_MODEL`
+- `GEMINI_IMAGE_ASPECT_RATIO`
+- `GEMINI_IMAGE_OUTPUT_MIME_TYPE`
+- `GEMINI_IMAGE_TIMEOUT_SECONDS`: `/image` provider timeout in seconds, default `60`
+- `GEMINI_IMAGE_COST_PER_IMAGE_USD`: optional log-only estimate rate, default `0`
 
 Image model notes:
 
-- Imagen remains the default `/image` model path and uses the dedicated Vertex `generate_images` API.
-- Gemini image models are supported through the Vertex `generate_content` API.
-- Slow image-generation calls now time out through `VERTEX_IMAGE_TIMEOUT_SECONDS` instead of hanging indefinitely.
-- `gemini-3-pro-image-preview` requires `VERTEX_LOCATION=global`.
+- `/image` uses Gemini image generation directly and supports reference-image prompts through the active Google media path.
+- Slow image-generation calls time out through `GEMINI_IMAGE_TIMEOUT_SECONDS` instead of hanging indefinitely.
 - To use a Telegram photo as a reference image, send the photo with a caption like `/image restyle this as a pencil sketch`, or reply to any Telegram photo with `/image <prompt>`; this requires a Gemini image model.
 
-Vertex video settings:
+Gemini video settings:
 
-- `VIDEO_PROVIDER_ORDER`: default `vertex,runpod`
-- `VERTEX_VIDEO_MODEL`
-- `VERTEX_VIDEO_ASPECT_RATIO`
-- `VERTEX_VIDEO_DURATION_SECONDS`
-- `VERTEX_VIDEO_OUTPUT_GCS_URI`
+- `VIDEO_PROVIDER_ORDER`: default `gemini,runpod`
+- `GEMINI_VIDEO_MODEL`
+- `GEMINI_VIDEO_ASPECT_RATIO`
+- `GEMINI_VIDEO_DURATION_SECONDS`
+- `GEMINI_VIDEO_TIMEOUT_SECONDS`
 - `BOT_VIDEO_MAX_BYTES`
 - `TELEGRAM_VIDEO_REQUEST_TIMEOUT_SECONDS`
 - `VIDEO_JOB_POLL_INTERVAL_SECONDS`
-- `VERTEX_VIDEO_COST_PER_SECOND_USD`: optional log-only estimate rate, default `0`
+- `GEMINI_VIDEO_COST_PER_SECOND_USD`: optional log-only estimate rate, default `0`
 
 Fal video settings:
 
@@ -282,7 +275,7 @@ Runpod video settings:
 - `RUNPOD_VIDEO_MODEL`: default `ltx-2.3-22b-distilled-1.1`
 - `RUNPOD_VIDEO_WIDTH`: default `576`, must be divisible by `64`
 - `RUNPOD_VIDEO_HEIGHT`: default `1024`, must be divisible by `64`
-- `RUNPOD_VIDEO_DURATION_SECONDS`: defaults to `VERTEX_VIDEO_DURATION_SECONDS` when unset
+- `RUNPOD_VIDEO_DURATION_SECONDS`: defaults to `GEMINI_VIDEO_DURATION_SECONDS` when unset
 - `RUNPOD_VIDEO_FRAME_RATE`: default `24`
 - `RUNPOD_VIDEO_EXECUTION_TIMEOUT_MS`: default `1800000`
 - `RUNPOD_VIDEO_TTL_MS`: default `7200000`
@@ -295,7 +288,7 @@ Runpod worker contract:
 - deploy a queue-based Serverless endpoint that accepts `/run` and `/status/{job_id}`
 - the endpoint ID setting is the plain Runpod endpoint ID, not the `/v2/.../run` URL path
 - request input is `prompt`, `model`, `width`, `height`, `num_frames`, `frame_rate`, optional `pipeline`, optional two-stage `num_inference_steps`, optional `seed`, and optional reference-image fields such as `image_base64` and `image_strength`
-- the bot never sends Vertex-style `aspect_ratio` or ignored `steps` fields to Runpod
+- the bot keeps Runpod-specific sizing and quality parameters separate from the Gemini-backed default video path
 - for LTX, `num_frames` is snapped to the nearest valid `8k+1` frame count at or above the requested duration
 - completed output may include a direct URL such as `video_url`, or LTX durable-upload metadata under `s3.bucket`, `s3.key`, and `s3.endpoint_url`
 - for GCS-backed `s3` output, the bot signs the derived `gs://bucket/key` URL transiently, downloads it for Telegram delivery, and persists only the durable `gs://` URI
@@ -368,16 +361,14 @@ SQLITE_PATH=/app/volume/data/bot.db
 - `/status`: show update mode, configured models, and memory status
 - `/reset`: archive the current conversation and start a fresh one
 - `/settings`: choose per-chat/per-user video, image, and chat settings with inline buttons
-- `/image <prompt>`: generate one image through Vertex AI
-- `/video <prompt>`: queue one short video through the configured providers (Vertex, Runpod, or Fal), with Runpod fallback only on Vertex safety rejections
-- `/video_ltx <prompt>`: queue one short video directly through Runpod LTX
+- `/image <prompt>`: generate one image through Gemini
+- `/video <prompt>`: queue one short video through the configured providers (Gemini, Runpod, or Fal), with safety-only fallback based on provider order
 
 Reference-image commands:
 
 - send one photo with caption `/image <prompt>` to use that photo as the image-generation reference; this path requires a Gemini image model
 - send one photo with caption `/video <prompt>` to queue an image-to-video job using that photo as the first-frame reference
-- send one photo with caption `/video_ltx <prompt>` to queue a Runpod LTX image-to-video job using that photo as the reference image
-- reply to any Telegram photo with text `/image <prompt>`, `/video <prompt>`, or `/video_ltx <prompt>` to use the replied photo as the reference image
+- reply to any Telegram photo with text `/image <prompt>` or `/video <prompt>` to use the replied photo as the reference image
 - send one photo with any other caption to keep using the normal OpenAI image-understanding path
 
 Settings presets:
@@ -397,7 +388,7 @@ Run the test suite:
 uv run pytest
 ```
 
-The repository already includes tests for health and readiness, normalization, allowlist handling, history reuse, reset behavior, draft streaming and fallback, Telegram formatting, image generation, reference-image command captions and reply-to-photo commands, video job handling, Vertex provider flows, Runpod provider flows, Fal provider flows, video provider routing, Fal family settings, and runtime callback validation.
+The repository already includes tests for health and readiness, normalization, allowlist handling, history reuse, reset behavior, draft streaming and fallback, Telegram formatting, image generation, reference-image command captions and reply-to-photo commands, video job handling, Gemini provider flows, Runpod provider flows, Fal provider flows, video provider routing, Fal family settings, and runtime callback validation.
 
 ## Project Layout
 

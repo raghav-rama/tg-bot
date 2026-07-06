@@ -35,13 +35,22 @@ def make_command_message(*, user_id: int, chat_id: int, command: str, update_id:
 class RecordingEmitter:
     def __init__(self) -> None:
         self.sent_texts: list[str] = []
+        self.sent_photos: list[bytes] = []
         self.sent_videos: list[bytes] = []
 
     async def send_text(self, text: str) -> None:
         self.sent_texts.append(text)
 
     async def send_photo(self, image) -> SentPhoto:
-        raise AssertionError("send_photo should not be used in video job worker tests")
+        self.sent_photos.append(image.image_bytes)
+        return SentPhoto(
+            telegram_message_id=9400,
+            telegram_file_id="tg-photo-9400",
+            telegram_file_unique_id="tg-photo-uniq-9400",
+            width=1024,
+            height=1024,
+            file_size=len(image.image_bytes),
+        )
 
     async def send_video(self, video) -> SentVideo:
         self.sent_videos.append(video.video_bytes)
@@ -93,7 +102,9 @@ async def test_worker_completes_video_job_and_delivers_video(service_bundle) -> 
         conversations=conversations,
         messages=messages,
         generation_jobs=generation_jobs,
+        image_generator=service_bundle["image_generator"],
         video_generator=video_generator,
+        generated_images=service_bundle["generated_images"],
         emitter_factory=lambda _chat_id: emitter,
     )
 
@@ -102,7 +113,8 @@ async def test_worker_completes_video_job_and_delivers_video(service_bundle) -> 
     stored_messages = await messages.list_for_conversation(conversation.id)
 
     assert processed == 1
-    assert video_generator.poll_calls[0].provider == "vertex"
+    assert len(video_generator.submit_calls) == 1
+    assert video_generator.poll_calls[0].provider == "gemini"
     assert emitter.sent_videos == [b"generated-video"]
     assert emitter.sent_texts == ["Your video is ready."]
     assert stored_jobs[0].status == "completed"
@@ -112,6 +124,57 @@ async def test_worker_completes_video_job_and_delivers_video(service_bundle) -> 
         "command",
         "command",
         "generated_video",
+    ]
+
+
+async def test_worker_completes_image_job_and_delivers_photo(service_bundle) -> None:
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    messages = service_bundle["messages"]
+    generated_images = service_bundle["generated_images"]
+    generation_jobs = service_bundle["generation_jobs"]
+    settings = service_bundle["settings"]
+    image_generator = service_bundle["image_generator"]
+
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=507,
+            command="/image watercolor fox in snowfall",
+            update_id=31,
+        )
+    )
+    conversation = await conversations.get_active(507)
+    assert conversation is not None
+
+    emitter = RecordingEmitter()
+    worker = VideoJobWorker(
+        settings=settings,
+        conversations=conversations,
+        messages=messages,
+        generation_jobs=generation_jobs,
+        generated_images=generated_images,
+        image_generator=image_generator,
+        emitter_factory=lambda _chat_id: emitter,
+    )
+
+    processed = await worker.run_once()
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    stored_messages = await messages.list_for_conversation(conversation.id)
+    stored_images = await generated_images.list_for_conversation(conversation.id)
+
+    assert processed == 1
+    assert len(image_generator.calls) == 1
+    assert image_generator.submit_calls == []
+    assert image_generator.poll_calls == []
+    assert emitter.sent_photos == [b"generated-image"]
+    assert stored_jobs[0].status == "completed"
+    assert stored_jobs[0].telegram_file_id == "tg-photo-9400"
+    assert stored_images[0].telegram_file_id == "tg-photo-9400"
+    assert [message.message_type for message in stored_messages] == [
+        "command",
+        "command",
+        "generated_image",
     ]
 
 
@@ -140,7 +203,9 @@ async def test_worker_completes_runpod_job_by_persisted_provider(service_bundle)
         conversations=conversations,
         messages=messages,
         generation_jobs=generation_jobs,
+        image_generator=service_bundle["image_generator"],
         video_generator=video_generator,
+        generated_images=service_bundle["generated_images"],
         emitter_factory=lambda _chat_id: emitter,
     )
 
@@ -188,7 +253,9 @@ async def test_worker_does_not_log_still_running_poll_at_info(
         conversations=conversations,
         messages=messages,
         generation_jobs=generation_jobs,
+        image_generator=service_bundle["image_generator"],
         video_generator=video_generator,
+        generated_images=service_bundle["generated_images"],
         emitter_factory=lambda _chat_id: emitter,
     )
 
@@ -210,7 +277,7 @@ async def test_worker_logs_completion_usage_and_cost_estimate(
     settings = service_bundle["settings"]
     video_generator = service_bundle["video_generator"]
 
-    settings.vertex_video_cost_per_second_usd = 0.35
+    settings.gemini_video_cost_per_second_usd = 0.35
     await service.handle_inbound(
         make_command_message(
             user_id=42,
@@ -228,7 +295,9 @@ async def test_worker_logs_completion_usage_and_cost_estimate(
         conversations=conversations,
         messages=service_bundle["messages"],
         generation_jobs=generation_jobs,
+        image_generator=service_bundle["image_generator"],
         video_generator=video_generator,
+        generated_images=service_bundle["generated_images"],
         emitter_factory=lambda _chat_id: emitter,
     )
 
@@ -236,8 +305,8 @@ async def test_worker_logs_completion_usage_and_cost_estimate(
         await worker.run_once()
 
     assert "video_job_completed" in caplog.text
-    assert "provider=vertex" in caplog.text
-    assert "model=veo-3.0-fast-generate-001" in caplog.text
+    assert "provider=gemini" in caplog.text
+    assert "model=gemini-omni-flash-preview" in caplog.text
     assert "duration_seconds=4" in caplog.text
     assert "file_size=" in caplog.text
     assert "cost_estimate_available=True" in caplog.text
@@ -386,12 +455,12 @@ async def test_worker_uses_fal_cost_rate_for_fal_jobs(service_bundle) -> None:
         emitter_factory=lambda _chat_id: RecordingEmitter(),
     )
     settings.fal_video_cost_per_second_usd = 0.42
-    settings.vertex_video_cost_per_second_usd = 0.10
+    settings.gemini_video_cost_per_second_usd = 0.10
     settings.runpod_video_cost_per_second_usd = 0.20
 
     assert worker._video_cost_for_provider("fal") == 0.42
     assert worker._video_cost_for_provider("runpod") == 0.20
-    assert worker._video_cost_for_provider("vertex") == 0.10
+    assert worker._video_cost_for_provider("gemini") == 0.10
 
 
 async def test_worker_completes_fal_job_and_delivers_video(service_bundle) -> None:

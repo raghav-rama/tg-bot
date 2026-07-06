@@ -103,7 +103,7 @@ def test_normalize_reply_photo_image_command_populates_reference_image() -> None
         message=update.message,
         update_id=update.update_id,
         image_bytes=None,
-        reply_image_bytes=b"reply-reference-image",
+        reply_image_bytes=None,
         image_max_bytes=1024,
     )
 
@@ -113,7 +113,8 @@ def test_normalize_reply_photo_image_command_populates_reference_image() -> None
     assert inbound.image is not None
     assert inbound.image.telegram_file_id == "reply-large"
     assert inbound.image.telegram_file_unique_id == "reply-uniq-large"
-    assert inbound.image.byte_size == len(b"reply-reference-image")
+    assert inbound.image.byte_size == 512
+    assert inbound.image.bytes_b64 is None
     assert inbound.image.caption is None
 
 
@@ -182,7 +183,7 @@ def test_normalize_photo_caption_image_command_populates_reference_image() -> No
     inbound = normalize_message(
         message=update.message,
         update_id=update.update_id,
-        image_bytes=b"reference-image",
+        image_bytes=None,
         image_max_bytes=1024,
     )
 
@@ -191,7 +192,8 @@ def test_normalize_photo_caption_image_command_populates_reference_image() -> No
     assert inbound.text == "/image stylize this as ink wash"
     assert inbound.image is not None
     assert inbound.image.telegram_file_id == "large"
-    assert inbound.image.byte_size == len(b"reference-image")
+    assert inbound.image.byte_size == 512
+    assert inbound.image.bytes_b64 is None
 
 
 def test_normalize_photo_caption_video_command_populates_reference_image() -> None:
@@ -217,7 +219,7 @@ def test_normalize_photo_caption_video_command_populates_reference_image() -> No
     inbound = normalize_message(
         message=update.message,
         update_id=update.update_id,
-        image_bytes=b"reference-image",
+        image_bytes=None,
         image_max_bytes=1024,
     )
 
@@ -226,9 +228,11 @@ def test_normalize_photo_caption_video_command_populates_reference_image() -> No
     assert inbound.text == "/video animate this scene"
     assert inbound.image is not None
     assert inbound.image.telegram_file_unique_id == "uniq-large"
+    assert inbound.image.byte_size == 512
+    assert inbound.image.bytes_b64 is None
 
 
-def test_normalize_photo_caption_video_ltx_command_populates_reference_image() -> None:
+def test_normalize_photo_caption_unknown_video_command_falls_back_to_image_message() -> None:
     update = build_update(
         {
             "message_id": 16,
@@ -255,8 +259,8 @@ def test_normalize_photo_caption_video_ltx_command_populates_reference_image() -
         image_max_bytes=1024,
     )
 
-    assert inbound.message_type == "command"
-    assert inbound.command == "/video_ltx"
+    assert inbound.message_type == "image"
+    assert inbound.command is None
     assert inbound.text == "/video_ltx animate this scene"
     assert inbound.image is not None
     assert inbound.image.telegram_file_unique_id == "uniq-large"

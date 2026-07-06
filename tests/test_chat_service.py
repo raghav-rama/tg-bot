@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timezone
 
 from pydantic import SecretStr
@@ -421,10 +422,10 @@ async def test_reset_starts_fresh_conversation_without_deleting_prior_history(se
     assert len(second_messages) == 4
 
 
-async def test_image_command_generates_photo_and_persists_metadata(service_bundle) -> None:
+async def test_image_command_queues_generation_job(service_bundle) -> None:
     service = service_bundle["service"]
     conversations = service_bundle["conversations"]
-    generated_images = service_bundle["generated_images"]
+    generation_jobs = service_bundle["generation_jobs"]
     image_generator = service_bundle["image_generator"]
     emitter = FakeResponseEmitter()
 
@@ -439,32 +440,35 @@ async def test_image_command_generates_photo_and_persists_metadata(service_bundl
     )
     conversation = await conversations.get_active(210)
 
-    assert reply.text == ""
+    assert reply.text == "Image generation started. I'll send it here when it's ready."
     assert reply.delivered is True
-    assert len(image_generator.calls) == 1
-    assert emitter.sent_texts == []
-    assert emitter.sent_photos == [b"generated-image"]
+    assert image_generator.calls == []
+    assert emitter.sent_texts == [reply.text]
+    assert emitter.sent_photos == []
     assert conversation is not None
 
-    stored_images = await generated_images.list_for_conversation(conversation.id)
-    assert len(stored_images) == 1
-    assert stored_images[0].prompt_text == "cinematic poster of a fox astronaut"
-    assert stored_images[0].provider == "vertex"
-    assert stored_images[0].telegram_file_id == "tg-photo-1"
-    assert stored_images[0].model == service.settings.vertex_image_model
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    assert len(stored_jobs) == 1
+    assert stored_jobs[0].job_type == "image"
+    assert stored_jobs[0].status == "queued"
+    assert stored_jobs[0].provider == "gemini"
+    assert stored_jobs[0].model == service.settings.gemini_image_model
+    assert stored_jobs[0].provider_operation_name is None
+
+    request_payload = json.loads(stored_jobs[0].request_payload)
+    assert request_payload["prompt"] == "cinematic poster of a fox astronaut"
+    assert request_payload["reference_image"] is None
 
 
-async def test_image_caption_command_passes_reference_image_for_gemini_model(
+async def test_image_caption_command_persists_reference_image_for_gemini_model(
     service_bundle,
 ) -> None:
     service = service_bundle["service"]
     conversations = service_bundle["conversations"]
-    messages = service_bundle["messages"]
-    image_generator = service_bundle["image_generator"]
+    generation_jobs = service_bundle["generation_jobs"]
     emitter = FakeResponseEmitter()
 
-    service.settings.vertex_image_model = "gemini-3-pro-image-preview"
-    service.settings.vertex_location = "global"
+    service.settings.gemini_image_model = "gemini-3.1-flash-image"
 
     reply = await service.handle_inbound(
         make_image_command_message(
@@ -478,25 +482,26 @@ async def test_image_caption_command_passes_reference_image_for_gemini_model(
     conversation = await conversations.get_active(220)
 
     assert reply.delivered is True
-    assert len(image_generator.calls) == 1
-    assert image_generator.calls[0].reference_image is not None
-    assert image_generator.calls[0].reference_image.telegram_file_unique_id == "uniq-ref"
+    assert emitter.sent_texts == [reply.text]
     assert conversation is not None
 
-    stored_messages = await messages.list_for_conversation(conversation.id)
-    assert stored_messages[0].message_type == "command"
-    assert stored_messages[0].image_file_unique_id == "uniq-ref"
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    request_payload = json.loads(stored_jobs[0].request_payload)
+    reference_image = request_payload["reference_image"]
+    assert reference_image is not None
+    assert reference_image["telegram_file_unique_id"] == "uniq-ref"
+    assert reference_image["bytes_b64"] is None
 
 
-async def test_image_reply_photo_command_passes_reference_image_for_gemini_model(
+async def test_image_reply_photo_command_persists_reference_image_for_gemini_model(
     service_bundle,
 ) -> None:
     service = service_bundle["service"]
-    image_generator = service_bundle["image_generator"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
     emitter = FakeResponseEmitter()
 
-    service.settings.vertex_image_model = "gemini-3-pro-image-preview"
-    service.settings.vertex_location = "global"
+    service.settings.gemini_image_model = "gemini-3.1-flash-image"
 
     reply = await service.handle_inbound(
         make_reply_photo_command_message(
@@ -509,21 +514,23 @@ async def test_image_reply_photo_command_passes_reference_image_for_gemini_model
     )
 
     assert reply.delivered is True
-    assert len(image_generator.calls) == 1
-    assert image_generator.calls[0].prompt == "make this cinematic"
-    assert image_generator.calls[0].reference_image is not None
-    assert image_generator.calls[0].reference_image.caption is None
-    assert image_generator.calls[0].reference_image.telegram_file_unique_id == "uniq-ref"
+    conversation = await conversations.get_active(230)
+    assert conversation is not None
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    request_payload = json.loads(stored_jobs[0].request_payload)
+    assert request_payload["prompt"] == "make this cinematic"
+    assert request_payload["reference_image"] is not None
+    assert request_payload["reference_image"]["caption"] is None
+    assert request_payload["reference_image"]["telegram_file_unique_id"] == "uniq-ref"
 
 
-async def test_image_caption_command_rejects_imagen_model_without_provider_call(
-    service_bundle,
-) -> None:
+async def test_image_caption_command_uses_current_gemini_image_model(service_bundle) -> None:
     service = service_bundle["service"]
-    image_generator = service_bundle["image_generator"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
     emitter = FakeResponseEmitter()
 
-    service.settings.vertex_image_model = "imagen-4.0-fast-generate-001"
+    service.settings.gemini_image_model = "gemini-3.1-flash-image"
 
     reply = await service.handle_inbound(
         make_image_command_message(
@@ -535,13 +542,15 @@ async def test_image_caption_command_rejects_imagen_model_without_provider_call(
         responder=emitter,
     )
 
-    assert reply.text == (
-        "Reference images for /image require a Gemini image model. "
-        "Set VERTEX_IMAGE_MODEL to a Gemini image model and try again."
-    )
+    assert reply.text == "Image generation started. I'll send it here when it's ready."
     assert reply.delivered is True
-    assert image_generator.calls == []
     assert emitter.sent_photos == []
+    conversation = await conversations.get_active(221)
+    assert conversation is not None
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    request_payload = json.loads(stored_jobs[0].request_payload)
+    assert request_payload["model"] == "gemini-3.1-flash-image"
+    assert request_payload["reference_image"] is not None
 
 
 async def test_image_command_logs_usage_and_cost_estimate(
@@ -551,8 +560,8 @@ async def test_image_command_logs_usage_and_cost_estimate(
     service = service_bundle["service"]
     emitter = FakeResponseEmitter()
 
-    service.settings.vertex_image_model = "imagen-4.0-fast-generate-001"
-    service.settings.vertex_image_cost_per_image_usd = 0.05
+    service.settings.gemini_image_model = "gemini-3.1-flash-image"
+    service.settings.gemini_image_cost_per_image_usd = 0.05
 
     with caplog.at_level("INFO", logger="app.domain.services"):
         await service.handle_inbound(
@@ -566,9 +575,8 @@ async def test_image_command_logs_usage_and_cost_estimate(
         )
 
     assert "message_processed" in caplog.text
-    assert "provider=vertex" in caplog.text
-    assert "model=imagen-4.0-fast-generate-001" in caplog.text
-    assert "api_method=generate_images" in caplog.text
+    assert "provider=gemini" in caplog.text
+    assert "model=gemini-3.1-flash-image" in caplog.text
     assert "generated_images=1" in caplog.text
     assert "prompt_chars=" in caplog.text
     assert "cost_estimate_available=True" in caplog.text
@@ -616,6 +624,8 @@ async def test_image_caption_command_with_reference_image_still_requires_prompt(
 async def test_image_command_provider_failure_returns_retry_text(service_bundle) -> None:
     service = service_bundle["service"]
     image_generator = service_bundle["image_generator"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
     emitter = FakeResponseEmitter()
 
     image_generator.error = ProviderTimeoutError("timed out")
@@ -630,9 +640,14 @@ async def test_image_command_provider_failure_returns_retry_text(service_bundle)
         responder=emitter,
     )
 
-    assert reply.text == IMAGE_GENERATION_RETRY_TEXT
+    conversation = await conversations.get_active(212)
+    assert conversation is not None
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+
+    assert reply.text == "Image generation started. I'll send it here when it's ready."
     assert reply.delivered is True
-    assert emitter.sent_texts == [IMAGE_GENERATION_RETRY_TEXT]
+    assert stored_jobs[0].status == "queued"
+    assert emitter.sent_texts == [reply.text]
     assert emitter.sent_photos == []
 
 
@@ -678,16 +693,17 @@ async def test_video_command_queues_generation_job(service_bundle) -> None:
 
     assert reply.text == "Video generation started. I'll send it here when it's ready."
     assert reply.delivered is True
-    assert len(video_generator.submit_calls) == 1
-    assert video_generator.submit_calls[0].provider_hint == "auto"
+    assert video_generator.submit_calls == []
     assert conversation is not None
 
     stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
     assert len(stored_jobs) == 1
     assert stored_jobs[0].status == "queued"
-    assert stored_jobs[0].provider == "vertex"
+    assert stored_jobs[0].provider == "gemini"
     assert stored_jobs[0].prompt_text == "slow cinematic dolly shot through a rainy neon alley"
-    assert stored_jobs[0].operation_name == "operations/1"
+    assert stored_jobs[0].provider_operation_name is None
+    request_payload = json.loads(stored_jobs[0].request_payload)
+    assert request_payload["provider_hint"] == "auto"
     assert emitter.sent_texts == [reply.text]
     assert emitter.sent_videos == []
 
@@ -702,7 +718,8 @@ def _enable_fal_for(service, *, model: str = "fal-ai/kling-video/v3/standard/tex
 
 async def test_video_fal_first_provider_order_uses_fal_model(service_bundle) -> None:
     service = service_bundle["service"]
-    video_generator = service_bundle["video_generator"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
 
     _enable_fal_for(service)
     await service.handle_inbound(
@@ -714,16 +731,20 @@ async def test_video_fal_first_provider_order_uses_fal_model(service_bundle) -> 
         ),
     )
 
-    request = video_generator.submit_calls[0]
-    assert request.provider_hint == "auto"
-    assert request.model == "fal-ai/kling-video/v3/standard/text-to-video"
-    assert request.resolution == "720p"
+    conversation = await conversations.get_active(990)
+    assert conversation is not None
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    request = json.loads(stored_jobs[0].request_payload)
+    assert request["provider_hint"] == "auto"
+    assert request["model"] == "fal-ai/kling-video/v3/standard/text-to-video"
+    assert request["resolution"] == "720p"
 
 
 async def test_video_fal_provider_preference_sets_provider_hint_and_model(service_bundle) -> None:
     service = service_bundle["service"]
     preferences = service_bundle["preferences"]
-    video_generator = service_bundle["video_generator"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
 
     _enable_fal_for(service)
     await preferences.set_preference(
@@ -742,14 +763,18 @@ async def test_video_fal_provider_preference_sets_provider_hint_and_model(servic
         ),
     )
 
-    request = video_generator.submit_calls[0]
-    assert request.provider_hint == "fal"
-    assert request.model == "fal-ai/kling-video/v3/standard/text-to-video"
+    conversation = await conversations.get_active(992)
+    assert conversation is not None
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    request = json.loads(stored_jobs[0].request_payload)
+    assert request["provider_hint"] == "fal"
+    assert request["model"] == "fal-ai/kling-video/v3/standard/text-to-video"
 
 
 async def test_video_fal_with_reference_image_prefers_reference_to_video_model(service_bundle) -> None:
     service = service_bundle["service"]
-    video_generator = service_bundle["video_generator"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
 
     _enable_fal_for(
         service,
@@ -765,24 +790,35 @@ async def test_video_fal_with_reference_image_prefers_reference_to_video_model(s
         ),
     )
 
-    request = video_generator.submit_calls[0]
-    assert request.provider_hint == "auto"
-    assert request.model == "bytedance/seedance-2.0/reference-to-video"
-    assert request.resolution == "720p"
+    conversation = await conversations.get_active(991)
+    assert conversation is not None
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    request = json.loads(stored_jobs[0].request_payload)
+    assert request["provider_hint"] == "auto"
+    assert request["model"] == "bytedance/seedance-2.0/reference-to-video"
+    assert request["resolution"] == "720p"
 
 
-async def test_video_ltx_command_submits_runpod_job(service_bundle) -> None:
+async def test_video_command_with_runpod_preference_submits_runpod_job(service_bundle) -> None:
     service = service_bundle["service"]
     conversations = service_bundle["conversations"]
     generation_jobs = service_bundle["generation_jobs"]
     video_generator = service_bundle["video_generator"]
     emitter = FakeResponseEmitter()
 
+    await service_bundle["preferences"].set_preference(
+        chat_id=224,
+        user_id=42,
+        preference_type="video_provider",
+        preset_id="runpod",
+        updated_at=utc_datetime(),
+    )
+
     reply = await service.handle_inbound(
         make_command_message(
             user_id=42,
             chat_id=224,
-            command="/video_ltx simple cinematic shot of clouds over a valley",
+            command="/video simple cinematic shot of clouds over a valley",
             update_id=19,
         ),
         responder=emitter,
@@ -791,8 +827,7 @@ async def test_video_ltx_command_submits_runpod_job(service_bundle) -> None:
 
     assert reply.text == "Video generation started. I'll send it here when it's ready."
     assert reply.delivered is True
-    assert len(video_generator.submit_calls) == 1
-    assert video_generator.submit_calls[0].provider_hint == "runpod"
+    assert video_generator.submit_calls == []
     assert conversation is not None
 
     stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
@@ -800,12 +835,15 @@ async def test_video_ltx_command_submits_runpod_job(service_bundle) -> None:
     assert stored_jobs[0].provider == "runpod"
     assert stored_jobs[0].model == service.settings.runpod_video_model
     assert stored_jobs[0].prompt_text == "simple cinematic shot of clouds over a valley"
+    request_payload = json.loads(stored_jobs[0].request_payload)
+    assert request_payload["provider_hint"] == "runpod"
 
 
 async def test_video_command_uses_saved_video_preferences(service_bundle, monkeypatch) -> None:
     service = service_bundle["service"]
     preferences = service_bundle["preferences"]
-    video_generator = service_bundle["video_generator"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
 
     monkeypatch.setattr("app.domain.services.random.randint", lambda _min, _max: 12345)
     await preferences.set_preference(
@@ -860,23 +898,27 @@ async def test_video_command_uses_saved_video_preferences(service_bundle, monkey
         ),
     )
 
-    request = video_generator.submit_calls[0]
-    assert request.provider_hint == "runpod"
-    assert request.model == "ltx-2.3-22b"
-    assert request.width == 576
-    assert request.height == 1024
-    assert request.duration_seconds == 8
-    assert request.frame_rate == 24.0
-    assert request.pipeline == "two_stage"
-    assert request.num_inference_steps == 50
-    assert request.seed == 12345
-    assert request.model_locked is True
+    conversation = await conversations.get_active(226)
+    assert conversation is not None
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    request = json.loads(stored_jobs[0].request_payload)
+    assert request["provider_hint"] == "runpod"
+    assert request["model"] == "ltx-2.3-22b"
+    assert request["width"] == 576
+    assert request["height"] == 1024
+    assert request["duration_seconds"] == 8
+    assert request["frame_rate"] == 24.0
+    assert request["pipeline"] == "two_stage"
+    assert request["num_inference_steps"] == 50
+    assert request["seed"] == 12345
+    assert request["model_locked"] is True
 
 
 async def test_video_reference_uses_saved_runpod_reference_strength(service_bundle) -> None:
     service = service_bundle["service"]
     preferences = service_bundle["preferences"]
-    video_generator = service_bundle["video_generator"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
 
     await preferences.set_preference(
         chat_id=229,
@@ -886,26 +928,38 @@ async def test_video_reference_uses_saved_runpod_reference_strength(service_bund
         updated_at=utc_datetime(),
     )
 
+    await preferences.set_preference(
+        chat_id=229,
+        user_id=42,
+        preference_type="video_provider",
+        preset_id="runpod",
+        updated_at=utc_datetime(),
+    )
+
     await service.handle_inbound(
         make_image_command_message(
             user_id=42,
             chat_id=229,
-            command="/video_ltx animate the subject",
+            command="/video animate the subject",
             update_id=23,
         ),
     )
 
-    request = video_generator.submit_calls[0]
-    assert request.provider_hint == "runpod"
-    assert request.reference_image is not None
-    assert request.image_strength == 0.9
+    conversation = await conversations.get_active(229)
+    assert conversation is not None
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    request = json.loads(stored_jobs[0].request_payload)
+    assert request["provider_hint"] == "runpod"
+    assert request["reference_image"] is not None
+    assert request["image_strength"] == 0.9
 
 
 async def test_video_reply_photo_command_passes_reference_image_to_submission(
     service_bundle,
 ) -> None:
     service = service_bundle["service"]
-    video_generator = service_bundle["video_generator"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
     emitter = FakeResponseEmitter()
 
     reply = await service.handle_inbound(
@@ -919,53 +973,67 @@ async def test_video_reply_photo_command_passes_reference_image_to_submission(
     )
 
     assert reply.text == "Video generation started. I'll send it here when it's ready."
-    assert len(video_generator.submit_calls) == 1
-    request = video_generator.submit_calls[0]
-    assert request.provider_hint == "auto"
-    assert request.prompt == "animate this with a slow camera push"
-    assert request.reference_image is not None
-    assert request.reference_image.caption is None
-    assert request.reference_image.telegram_file_unique_id == "uniq-ref"
+    conversation = await conversations.get_active(231)
+    assert conversation is not None
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    request_payload = json.loads(stored_jobs[0].request_payload)
+    assert request_payload["provider_hint"] == "auto"
+    assert request_payload["prompt"] == "animate this with a slow camera push"
+    assert request_payload["reference_image"] is not None
+    assert request_payload["reference_image"]["caption"] is None
+    assert request_payload["reference_image"]["telegram_file_unique_id"] == "uniq-ref"
 
 
-async def test_video_ltx_reply_photo_command_passes_reference_image_to_runpod_submission(
+async def test_video_reply_photo_with_runpod_preference_passes_reference_image_to_runpod_submission(
     service_bundle,
 ) -> None:
     service = service_bundle["service"]
-    video_generator = service_bundle["video_generator"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
     emitter = FakeResponseEmitter()
+
+    await service_bundle["preferences"].set_preference(
+        chat_id=232,
+        user_id=42,
+        preference_type="video_provider",
+        preset_id="runpod",
+        updated_at=utc_datetime(),
+    )
 
     reply = await service.handle_inbound(
         make_reply_photo_command_message(
             user_id=42,
             chat_id=232,
-            command="/video_ltx animate this subject",
+            command="/video animate this subject",
             update_id=26,
         ),
         responder=emitter,
     )
 
     assert reply.text == "Video generation started. I'll send it here when it's ready."
-    assert len(video_generator.submit_calls) == 1
-    request = video_generator.submit_calls[0]
-    assert request.provider_hint == "runpod"
-    assert request.prompt == "animate this subject"
-    assert request.reference_image is not None
-    assert request.reference_image.caption is None
-    assert request.reference_image.telegram_file_unique_id == "uniq-ref"
+    conversation = await conversations.get_active(232)
+    assert conversation is not None
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    request_payload = json.loads(stored_jobs[0].request_payload)
+    assert request_payload["provider_hint"] == "runpod"
+    assert request_payload["prompt"] == "animate this subject"
+    assert request_payload["reference_image"] is not None
+    assert request_payload["reference_image"]["caption"] is None
+    assert request_payload["reference_image"]["telegram_file_unique_id"] == "uniq-ref"
 
 
 async def test_image_command_uses_saved_image_preset(service_bundle) -> None:
     service = service_bundle["service"]
     preferences = service_bundle["preferences"]
-    image_generator = service_bundle["image_generator"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
     emitter = FakeResponseEmitter()
 
     await preferences.set_preference(
         chat_id=227,
         user_id=42,
         preference_type="image",
-        preset_id="imagen_landscape_jpeg",
+        preset_id="gemini_landscape_jpeg",
         updated_at=utc_datetime(),
     )
 
@@ -979,10 +1047,13 @@ async def test_image_command_uses_saved_image_preset(service_bundle) -> None:
         responder=emitter,
     )
 
-    request = image_generator.calls[0]
-    assert request.model == "imagen-4.0-fast-generate-001"
-    assert request.aspect_ratio == "16:9"
-    assert request.output_mime_type == "image/jpeg"
+    conversation = await conversations.get_active(227)
+    assert conversation is not None
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    request_payload = json.loads(stored_jobs[0].request_payload)
+    assert request_payload["model"] == "gemini-3.1-flash-image"
+    assert request_payload["aspect_ratio"] == "16:9"
+    assert request_payload["output_mime_type"] == "image/jpeg"
 
 
 async def test_chat_message_uses_saved_chat_preset(service_bundle) -> None:
@@ -1013,7 +1084,6 @@ async def test_video_caption_command_passes_reference_image_to_submission(
     service = service_bundle["service"]
     conversations = service_bundle["conversations"]
     generation_jobs = service_bundle["generation_jobs"]
-    video_generator = service_bundle["video_generator"]
     emitter = FakeResponseEmitter()
 
     reply = await service.handle_inbound(
@@ -1029,14 +1099,14 @@ async def test_video_caption_command_passes_reference_image_to_submission(
 
     assert reply.text == "Video generation started. I'll send it here when it's ready."
     assert reply.delivered is True
-    assert len(video_generator.submit_calls) == 1
-    assert video_generator.submit_calls[0].reference_image is not None
-    assert video_generator.submit_calls[0].reference_image.telegram_file_unique_id == "uniq-ref"
     assert conversation is not None
 
     stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
     assert len(stored_jobs) == 1
     assert stored_jobs[0].prompt_text == "animate the subject with a slow camera push"
+    request_payload = json.loads(stored_jobs[0].request_payload)
+    assert request_payload["reference_image"] is not None
+    assert request_payload["reference_image"]["telegram_file_unique_id"] == "uniq-ref"
 
 
 async def test_video_command_logs_submission_usage_and_cost_estimate(
@@ -1045,7 +1115,7 @@ async def test_video_command_logs_submission_usage_and_cost_estimate(
 ) -> None:
     service = service_bundle["service"]
 
-    service.settings.vertex_video_cost_per_second_usd = 0.35
+    service.settings.gemini_video_cost_per_second_usd = 0.35
 
     with caplog.at_level("INFO", logger="app.domain.services"):
         await service.handle_inbound(
@@ -1058,8 +1128,8 @@ async def test_video_command_logs_submission_usage_and_cost_estimate(
         )
 
     assert "video_generation_requested" in caplog.text
-    assert "provider=vertex" in caplog.text
-    assert "model=veo-3.0-fast-generate-001" in caplog.text
+    assert "provider=gemini" in caplog.text
+    assert "model=gemini-omni-flash-preview" in caplog.text
     assert "duration_seconds=4" in caplog.text
     assert "prompt_chars=" in caplog.text
     assert "cost_estimate_available=True" in caplog.text
@@ -1084,6 +1154,8 @@ async def test_video_command_requires_prompt(service_bundle) -> None:
 async def test_video_command_provider_failure_returns_retry_text(service_bundle) -> None:
     service = service_bundle["service"]
     video_generator = service_bundle["video_generator"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
     emitter = FakeResponseEmitter()
 
     video_generator.submit_error = ProviderTimeoutError("timed out")
@@ -1098,9 +1170,14 @@ async def test_video_command_provider_failure_returns_retry_text(service_bundle)
         responder=emitter,
     )
 
-    assert reply.text == VIDEO_GENERATION_RETRY_TEXT
+    conversation = await conversations.get_active(216)
+    assert conversation is not None
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+
+    assert reply.text == "Video generation started. I'll send it here when it's ready."
     assert reply.delivered is True
-    assert emitter.sent_texts == [VIDEO_GENERATION_RETRY_TEXT]
+    assert stored_jobs[0].status == "queued"
+    assert emitter.sent_texts == [reply.text]
     assert emitter.sent_videos == []
 
 

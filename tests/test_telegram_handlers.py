@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from aiogram.types import Update
 
+from app.config import Settings
 from app.domain.models import ServiceReply
 from app.telegram.handlers import TelegramUpdateProcessor
 
@@ -40,13 +41,20 @@ class FakeBot:
         self.sent_messages.append(kwargs)
 
 
-async def test_processor_downloads_replied_photo_for_text_image_command(
-    service_bundle,
-) -> None:
+async def test_processor_downloads_replied_photo_for_text_image_command() -> None:
     chat_service = CapturingChatService()
     processor = TelegramUpdateProcessor(
         chat_service=chat_service,
-        settings=service_bundle["settings"],
+        settings=Settings(
+            _env_file=None,
+            TELEGRAM_BOT_TOKEN="test-token",
+            OPENAI_API_KEY="test-key",
+            TELEGRAM_ALLOWED_USER_IDS="42",
+            SQLITE_PATH="/tmp/test-telegram-handlers.db",
+            APP_UPDATE_MODE="webhook",
+            TELEGRAM_WEBHOOK_URL="https://bot.example.com/telegram/webhook",
+            TELEGRAM_WEBHOOK_SECRET_TOKEN="test-webhook-secret",
+        ),
     )
     bot = FakeBot()
     update = build_update(
@@ -87,10 +95,11 @@ async def test_processor_downloads_replied_photo_for_text_image_command(
         update_id=update.update_id,
     )
 
-    assert bot.downloaded_file_ids == ["reply-large"]
+    assert bot.downloaded_file_ids == []
     assert len(chat_service.inbound_messages) == 1
     inbound = chat_service.inbound_messages[0]
     assert inbound.text == "/image make this cinematic"
     assert inbound.image is not None
     assert inbound.image.telegram_file_id == "reply-large"
-    assert inbound.image.bytes_b64 == "ZG93bmxvYWRlZC1yZXBseS1waG90bw=="
+    assert inbound.image.byte_size == 512
+    assert inbound.image.bytes_b64 is None
