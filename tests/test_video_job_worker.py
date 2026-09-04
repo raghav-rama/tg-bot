@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.methods import SendVideo
@@ -194,7 +194,7 @@ async def test_worker_completes_runpod_job_by_persisted_provider(service_bundle)
         model=settings.runpod_video_model,
         operation_name="runpod-job-1",
         duration_seconds=4,
-        created_at=utc_datetime(),
+        created_at=datetime.now(timezone.utc),
     )
 
     emitter = RecordingEmitter()
@@ -237,7 +237,7 @@ async def test_worker_does_not_log_still_running_poll_at_info(
         model=settings.runpod_video_model,
         operation_name="runpod-job-running",
         duration_seconds=4,
-        created_at=utc_datetime(),
+        created_at=datetime.now(timezone.utc),
     )
     await generation_jobs.mark_running(job_id)
     video_generator.poll_results = [
@@ -581,3 +581,118 @@ async def test_worker_marks_fal_job_failed_on_poll_failure(service_bundle) -> No
     ]
     assert stored_jobs[0].status == "failed"
     assert "Fal capacity exhausted" in (stored_jobs[0].failure_reason or "")
+async def test_worker_abandons_video_job_older_than_max_age(service_bundle) -> None:
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
+    settings = service_bundle["settings"]
+    video_generator = service_bundle["video_generator"]
+
+    conversation = await conversations.get_or_create_active(505)
+    await generation_jobs.add_video_job(
+        conversation_id=conversation.id,
+        chat_id=505,
+        user_id=42,
+        prompt_text="a lighthouse beam sweeping across fog",
+        provider="vertex",
+        model="veo-3.0-fast-generate-001",
+        operation_name="operations/stale",
+        duration_seconds=4,
+        created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    video_generator.poll_error = RuntimeError(
+        "Error code: 404 - {'error': {'message': 'Requested entity was not found.'}}"
+    )
+
+    emitter = RecordingEmitter()
+    worker = VideoJobWorker(
+        settings=settings,
+        conversations=conversations,
+        messages=service_bundle["messages"],
+        generation_jobs=generation_jobs,
+        video_generator=video_generator,
+        emitter_factory=lambda _chat_id: emitter,
+    )
+
+    await worker.run_once()
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+
+    assert video_generator.poll_calls == []
+    assert stored_jobs[0].status == "failed"
+    assert "abandoned" in (stored_jobs[0].failure_reason or "")
+    assert emitter.sent_texts == [
+        "I couldn't generate a video just now. Please try again in a moment."
+    ]
+    assert await generation_jobs.list_pending_video_jobs() == []
+
+
+async def test_worker_keeps_retrying_recent_job_after_unexpected_poll_error(
+    service_bundle,
+) -> None:
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
+    settings = service_bundle["settings"]
+    video_generator = service_bundle["video_generator"]
+
+    conversation = await conversations.get_or_create_active(506)
+    await generation_jobs.add_video_job(
+        conversation_id=conversation.id,
+        chat_id=506,
+        user_id=42,
+        prompt_text="a paper boat drifting down a rain gutter",
+        provider="vertex",
+        model="veo-3.0-fast-generate-001",
+        operation_name="operations/recent",
+        duration_seconds=4,
+        created_at=datetime.now(timezone.utc)
+        - timedelta(seconds=settings.video_job_max_age_seconds - 60),
+    )
+    video_generator.poll_error = RuntimeError("transient upstream blip")
+
+    emitter = RecordingEmitter()
+    worker = VideoJobWorker(
+        settings=settings,
+        conversations=conversations,
+        messages=service_bundle["messages"],
+        generation_jobs=generation_jobs,
+        video_generator=video_generator,
+        emitter_factory=lambda _chat_id: emitter,
+    )
+
+    await worker.run_once()
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    pending_jobs = await generation_jobs.list_pending_video_jobs()
+
+    assert len(video_generator.poll_calls) == 1
+    assert stored_jobs[0].status == "running"
+    assert emitter.sent_texts == []
+    assert [pending.id for pending in pending_jobs] == [stored_jobs[0].id]
+
+
+async def test_queued_video_job_is_created_at_submission_time_not_message_time(
+    service_bundle,
+) -> None:
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
+    settings = service_bundle["settings"]
+
+    # The inbound message carries an old Telegram timestamp, standing in for a
+    # backlogged webhook delivery. The job is submitted now, so it must not be
+    # born older than the abandonment cap.
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=507,
+            command="/video a kite caught in a summer thermal",
+            update_id=7,
+        )
+    )
+    conversation = await conversations.get_active(507)
+    assert conversation is not None
+
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+    age_seconds = (
+        datetime.now(timezone.utc) - stored_jobs[0].created_at
+    ).total_seconds()
+
+    assert age_seconds < settings.video_job_max_age_seconds

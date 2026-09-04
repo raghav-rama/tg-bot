@@ -292,6 +292,10 @@ class Settings(BaseSettings):
         default=15,
         alias="VIDEO_JOB_POLL_INTERVAL_SECONDS",
     )
+    video_job_max_age_seconds: int = Field(
+        default=1800,
+        alias="VIDEO_JOB_MAX_AGE_SECONDS",
+    )
 
     @field_validator("app_update_mode")
     @classmethod
@@ -446,6 +450,7 @@ class Settings(BaseSettings):
         "bot_video_max_bytes",
         "telegram_video_request_timeout_seconds",
         "video_job_poll_interval_seconds",
+        "video_job_max_age_seconds",
         "runpod_video_width",
         "runpod_video_height",
         "runpod_video_duration_seconds",

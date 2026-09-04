@@ -5,6 +5,7 @@ import base64
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
+from datetime import datetime, timezone
 
 from app.config import Settings
 from app.domain.commands import (
@@ -245,6 +246,19 @@ class VideoJobWorker:
         )
 
     async def _process_video_job(self, job: StoredGenerationJob) -> None:
+        age_seconds = self._job_age_seconds(job)
+        if age_seconds > self.settings.video_job_max_age_seconds:
+            await self._fail_job(
+                job=job,
+                failure_reason=(
+                    f"Video generation abandoned after {int(age_seconds)}s "
+                    "without a terminal provider result"
+                ),
+                text=VIDEO_GENERATION_RETRY_TEXT,
+                log_event="video_job_abandoned",
+            )
+            return
+
         self.logger.debug(
             log_kv(
                 "video_job_processing_started",
@@ -603,6 +617,13 @@ class VideoJobWorker:
     @staticmethod
     def _provider_operation_name(job: StoredGenerationJob) -> str:
         return job.provider_operation_name or job.operation_name
+
+    @staticmethod
+    def _job_age_seconds(job: StoredGenerationJob) -> float:
+        created_at = job.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - created_at).total_seconds()
 
     @staticmethod
     def _format_delivery_failure_reason(*, prefix: str, exc: Exception) -> str:

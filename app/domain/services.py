@@ -931,7 +931,6 @@ class ChatService:
             operation_name=self._queued_job_handle("video", message),
             duration_seconds=requested_duration_seconds,
             request_payload=serialize_video_generation_request(request),
-            created_at=message.sent_at,
         )
         await self._persist_command_reply(conversation, VIDEO_GENERATION_QUEUED_TEXT)
         await self.conversations.touch(conversation.id)
