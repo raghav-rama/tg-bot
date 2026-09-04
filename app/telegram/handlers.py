@@ -88,7 +88,7 @@ class TelegramUpdateProcessor:
             user_id=callback.from_user.id,
             callback_data=callback.data,
         )
-        parsed = parse_settings_callback(callback.data)
+        parsed = parse_settings_callback(callback.data, settings=self.settings)
         if reply.error_type is not None:
             await callback.answer(text=reply.text, show_alert=True)
             return
