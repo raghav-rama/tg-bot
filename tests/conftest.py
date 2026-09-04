@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -187,6 +189,27 @@ class FakeVideoGenerator:
         return None
 
 
+@contextmanager
+def _env_without_settings_overrides():
+    """Hide the developer's environment while Settings is constructed.
+
+    The repo's .envrc feeds .env into the shell through direnv, so real
+    credentials and provider overrides otherwise reach Settings and silently
+    beat whatever a test passes explicitly. Deriving the names from the model
+    keeps this correct as settings are added.
+    """
+    aliases = [
+        field.alias for field in Settings.model_fields.values() if field.alias
+    ]
+    saved = {key: os.environ[key] for key in aliases if key in os.environ}
+    for key in saved:
+        del os.environ[key]
+    try:
+        yield
+    finally:
+        os.environ.update(saved)
+
+
 def build_settings(database_path: Path, **overrides) -> Settings:
     values = {
         "TELEGRAM_BOT_TOKEN": "test-token",
@@ -209,7 +232,8 @@ def build_settings(database_path: Path, **overrides) -> Settings:
         "VIDEO_JOB_POLL_INTERVAL_SECONDS": "15",
     }
     values.update(overrides)
-    return Settings(_env_file=None, **values)
+    with _env_without_settings_overrides():
+        return Settings(_env_file=None, **values)
 
 
 @pytest_asyncio.fixture
