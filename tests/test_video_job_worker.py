@@ -616,7 +616,7 @@ async def test_worker_abandons_video_job_older_than_max_age(service_bundle) -> N
     await worker.run_once()
     stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
 
-    assert video_generator.poll_calls == []
+    assert len(video_generator.poll_calls) == 1
     assert stored_jobs[0].status == "failed"
     assert "abandoned" in (stored_jobs[0].failure_reason or "")
     assert emitter.sent_texts == [
@@ -696,3 +696,94 @@ async def test_queued_video_job_is_created_at_submission_time_not_message_time(
     ).total_seconds()
 
     assert age_seconds < settings.video_job_max_age_seconds
+
+
+async def test_worker_delivers_completed_video_for_job_older_than_max_age(
+    service_bundle,
+) -> None:
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
+    settings = service_bundle["settings"]
+    video_generator = service_bundle["video_generator"]
+
+    # The worker was down longer than the cap while the provider finished the
+    # video. A paid, completed result must still be delivered, never discarded.
+    conversation = await conversations.get_or_create_active(508)
+    await generation_jobs.add_video_job(
+        conversation_id=conversation.id,
+        chat_id=508,
+        user_id=42,
+        prompt_text="a heron lifting off a still lake",
+        provider="gemini",
+        model="veo-3.0-fast-generate-001",
+        operation_name="operations/late-but-done",
+        duration_seconds=4,
+        created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+
+    emitter = RecordingEmitter()
+    worker = VideoJobWorker(
+        settings=settings,
+        conversations=conversations,
+        messages=service_bundle["messages"],
+        generation_jobs=generation_jobs,
+        video_generator=video_generator,
+        emitter_factory=lambda _chat_id: emitter,
+    )
+
+    await worker.run_once()
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+
+    assert len(video_generator.poll_calls) == 1
+    assert emitter.sent_videos == [b"generated-video"]
+    assert stored_jobs[0].status == "completed"
+    assert stored_jobs[0].telegram_file_id == "tg-video-9500"
+
+
+async def test_worker_abandons_unsubmitted_job_older_than_max_age_without_submitting(
+    service_bundle,
+) -> None:
+    service = service_bundle["service"]
+    conversations = service_bundle["conversations"]
+    generation_jobs = service_bundle["generation_jobs"]
+    database = service_bundle["database"]
+    settings = service_bundle["settings"]
+    video_generator = service_bundle["video_generator"]
+
+    await service.handle_inbound(
+        make_command_message(
+            user_id=42,
+            chat_id=509,
+            command="/video a ferris wheel turning against a violet sky",
+            update_id=9,
+        )
+    )
+    conversation = await conversations.get_active(509)
+    assert conversation is not None
+
+    # The job was queued but never submitted, and the worker only reaches it
+    # long after the cap. Nothing has been paid for, so it must not submit.
+    stale = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    async with database.transaction() as connection:
+        await connection.execute(
+            "UPDATE generation_jobs SET created_at = ? WHERE conversation_id = ?",
+            (stale, conversation.id),
+        )
+
+    emitter = RecordingEmitter()
+    worker = VideoJobWorker(
+        settings=settings,
+        conversations=conversations,
+        messages=service_bundle["messages"],
+        generation_jobs=generation_jobs,
+        video_generator=video_generator,
+        emitter_factory=lambda _chat_id: emitter,
+    )
+
+    await worker.run_once()
+    stored_jobs = await generation_jobs.list_for_conversation(conversation.id)
+
+    assert video_generator.submit_calls == []
+    assert video_generator.poll_calls == []
+    assert stored_jobs[0].status == "failed"
+    assert "abandoned" in (stored_jobs[0].failure_reason or "")

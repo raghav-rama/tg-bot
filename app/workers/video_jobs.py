@@ -247,16 +247,10 @@ class VideoJobWorker:
 
     async def _process_video_job(self, job: StoredGenerationJob) -> None:
         age_seconds = self._job_age_seconds(job)
-        if age_seconds > self.settings.video_job_max_age_seconds:
-            await self._fail_job(
-                job=job,
-                failure_reason=(
-                    f"Video generation abandoned after {int(age_seconds)}s "
-                    "without a terminal provider result"
-                ),
-                text=VIDEO_GENERATION_RETRY_TEXT,
-                log_event="video_job_abandoned",
-            )
+        if self._is_awaiting_submission(job) and await self._abandon_if_expired(
+            job,
+            age_seconds=age_seconds,
+        ):
             return
 
         self.logger.debug(
@@ -351,6 +345,7 @@ class VideoJobWorker:
                     error_type=type(exc).__name__,
                 )
             )
+            await self._abandon_if_expired(job, age_seconds=age_seconds)
             return
         except Exception:
             self.logger.exception(
@@ -362,9 +357,12 @@ class VideoJobWorker:
                     error_type="UnhandledError",
                 )
             )
+            await self._abandon_if_expired(job, age_seconds=age_seconds)
             return
 
         if poll_result.status == "running":
+            if await self._abandon_if_expired(job, age_seconds=age_seconds):
+                return
             await self.generation_jobs.mark_running(job.id)
             self.logger.debug(
                 log_kv(
@@ -617,6 +615,29 @@ class VideoJobWorker:
     @staticmethod
     def _provider_operation_name(job: StoredGenerationJob) -> str:
         return job.provider_operation_name or job.operation_name
+
+    @staticmethod
+    def _is_awaiting_submission(job: StoredGenerationJob) -> bool:
+        return job.request_payload is not None and job.provider_operation_name is None
+
+    async def _abandon_if_expired(
+        self,
+        job: StoredGenerationJob,
+        *,
+        age_seconds: float,
+    ) -> bool:
+        if age_seconds <= self.settings.video_job_max_age_seconds:
+            return False
+        await self._fail_job(
+            job=job,
+            failure_reason=(
+                f"Video generation abandoned after {int(age_seconds)}s "
+                "without a terminal provider result"
+            ),
+            text=VIDEO_GENERATION_RETRY_TEXT,
+            log_event="video_job_abandoned",
+        )
+        return True
 
     @staticmethod
     def _job_age_seconds(job: StoredGenerationJob) -> float:
