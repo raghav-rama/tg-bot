@@ -185,6 +185,16 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 With `APP_UPDATE_MODE=polling`, FastAPI starts the Telegram polling runtime during application startup.
 
+## Continuous Integration
+
+`.github/workflows/ci.yml` runs the test suite on every push to `main` or `dev` and on every pull
+request targeting them. It installs the locked dependency set with `uv sync --locked --extra dev`
+on Python 3.13, matching the runtime image in `Dockerfile`, and runs `pytest`.
+
+The suite is hermetic — `tests/conftest.py` clears every environment variable matching a `Settings`
+alias — so CI needs no secrets and cannot pass by accident on a machine that happens to have a
+populated `.env`.
+
 ## Configuration
 
 Core settings:
