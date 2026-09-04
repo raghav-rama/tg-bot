@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 import pytest_asyncio
 
 from app.config import Settings
@@ -187,6 +190,41 @@ class FakeVideoGenerator:
         return None
 
 
+@pytest.fixture(autouse=True)
+def isolate_settings_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the whole suite free of the developer's environment.
+
+    build_settings hides these while it builds test settings, but production
+    code that falls back to a bare Settings() would still read them, so tests
+    would pass on a machine with .env exported and fail on a clean checkout.
+    """
+    for field in Settings.model_fields.values():
+        if field.alias:
+            monkeypatch.delenv(field.alias, raising=False)
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+
+
+@contextmanager
+def _env_without_settings_overrides():
+    """Hide the developer's environment while Settings is constructed.
+
+    The repo's .envrc feeds .env into the shell through direnv, so real
+    credentials and provider overrides otherwise reach Settings and silently
+    beat whatever a test passes explicitly. Deriving the names from the model
+    keeps this correct as settings are added.
+    """
+    aliases = [
+        field.alias for field in Settings.model_fields.values() if field.alias
+    ]
+    saved = {key: os.environ[key] for key in aliases if key in os.environ}
+    for key in saved:
+        del os.environ[key]
+    try:
+        yield
+    finally:
+        os.environ.update(saved)
+
+
 def build_settings(database_path: Path, **overrides) -> Settings:
     values = {
         "TELEGRAM_BOT_TOKEN": "test-token",
@@ -209,7 +247,8 @@ def build_settings(database_path: Path, **overrides) -> Settings:
         "VIDEO_JOB_POLL_INTERVAL_SECONDS": "15",
     }
     values.update(overrides)
-    return Settings(_env_file=None, **values)
+    with _env_without_settings_overrides():
+        return Settings(_env_file=None, **values)
 
 
 @pytest_asyncio.fixture

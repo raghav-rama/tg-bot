@@ -142,6 +142,11 @@ VIDEO_DURATION_PRESETS: dict[str, VideoDurationPreset] = {
         label="⏱️ 8s",
         duration_seconds=8,
     ),
+    "duration_10s": VideoDurationPreset(
+        id="duration_10s",
+        label="⏱️ 10s",
+        duration_seconds=10,
+    ),
 }
 
 VIDEO_ORIENTATION_PRESETS: dict[str, VideoOrientationPreset] = {

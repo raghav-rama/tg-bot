@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        # setup-uv publishes no floating major tag; pin the exact release.
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          # Match the runtime image in Dockerfile.
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+
+      - name: Run tests
+        # The suite is hermetic: tests/conftest.py clears every Settings alias
+        # from the environment, so no secrets are needed here.
+        run: uv run --no-sync pytest -q

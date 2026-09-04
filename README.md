@@ -185,6 +185,16 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 With `APP_UPDATE_MODE=polling`, FastAPI starts the Telegram polling runtime during application startup.
 
+## Continuous Integration
+
+`.github/workflows/ci.yml` runs the test suite on every push to `main` or `dev` and on every pull
+request targeting them. It installs the locked dependency set with `uv sync --locked --extra dev`
+on Python 3.13, matching the runtime image in `Dockerfile`, and runs `pytest`.
+
+The suite is hermetic — `tests/conftest.py` clears every environment variable matching a `Settings`
+alias — so CI needs no secrets and cannot pass by accident on a machine that happens to have a
+populated `.env`.
+
 ## Configuration
 
 Core settings:
@@ -245,6 +255,7 @@ Gemini video settings:
 - `BOT_VIDEO_MAX_BYTES`
 - `TELEGRAM_VIDEO_REQUEST_TIMEOUT_SECONDS`
 - `VIDEO_JOB_POLL_INTERVAL_SECONDS`
+- `VIDEO_JOB_MAX_AGE_SECONDS`: default `1800`; a video job older than this is marked failed instead of being polled forever. A submitted job is always polled once more first, so a late but completed video is still delivered; a job that was never submitted is dropped without submitting
 - `GEMINI_VIDEO_COST_PER_SECOND_USD`: optional log-only estimate rate, default `0`
 
 Fal video settings:

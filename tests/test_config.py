@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.config import Settings
+from conftest import build_settings
 
 
 _REPO_ENV_KEYS = (
@@ -673,3 +674,16 @@ def test_gemini_api_key_enables_google_media_generation(tmp_path, monkeypatch) -
     assert settings.gemini_image_generation_enabled is True
     assert settings.gemini_video_generation_enabled is True
     assert settings.video_generation_enabled is True
+
+
+def test_build_settings_ignores_developer_environment(tmp_path, monkeypatch) -> None:
+    # The repo's .envrc feeds .env into the shell through direnv, so real
+    # provider settings otherwise beat what a test passes explicitly and produce
+    # failures that depend on whose machine the suite runs on.
+    monkeypatch.setenv("VIDEO_PROVIDER_ORDER", "runpod")
+    monkeypatch.setenv("GEMINI_VIDEO_MODEL", "leaked-model")
+
+    settings = build_settings(tmp_path / "bot.db")
+
+    assert settings.video_provider_order != ("runpod",)
+    assert settings.gemini_video_model == "gemini-omni-flash-preview"
