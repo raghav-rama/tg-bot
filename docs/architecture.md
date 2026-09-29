@@ -309,6 +309,12 @@ The system prompt must be configurable through environment variables so it can b
 
 Phase 5 adds generated speech output after the Phase 4 hardening work tracked in [roadmap.md](roadmap.md).
 
+Implemented in the Phase 5 worktree; see [phase-5-elevenlabs-tts.md](phase-5-elevenlabs-tts.md).
+Live acceptance remains pending. `ChatService` applies the allowlist and routes
+`/tts` into `TextToSpeechService` before creating a supersedable chat run. The TTS
+service awaits the optional `TextToSpeechProvider` and uses `ResponseEmitter.send_voice`.
+Later messages and `/reset` do not cancel accepted speech requests.
+
 ### Command boundary
 
 - Add `/tts <text>` as an explicit command rather than overloading normal chat messages.
@@ -329,7 +335,7 @@ The provider request should include:
 - `voice_id`
 - `model`
 - `output_format`
-- optional `language_code`
+- no `language_code` for the initial implementation (Multilingual v2 does not support it)
 
 The provider response should include:
 
@@ -345,7 +351,7 @@ The first concrete implementation should use ElevenLabs text-to-speech with:
 
 - default voice ID: `vIdhHAZdn1bGjKe1dFw8`
 - default model: `eleven_multilingual_v2`
-- default language code: `hi` when supported by the SDK or REST path
+- language code: omitted; Hindi is detected from the supplied text
 - default output format: MP3 unless an OGG/Opus output is selected and verified against Telegram delivery
 
 ### Telegram delivery boundary
@@ -365,6 +371,8 @@ The Telegram adapter should remain transport-only:
 - Persist a lightweight assistant event row or generated-audio metadata if needed for traceability.
 - Do not persist raw generated audio bytes in SQLite.
 - Reusing Telegram `file_id` for repeated identical outputs is a later optimization, not required for the first milestone.
+- Atomically claim each TTS command before generation using `(chat_id, telegram_message_id)` across active and archived conversations. Duplicate Telegram updates never regenerate speech. Failed/interrupted requests require a fresh command.
+- Store a successful assistant outcome only after Telegram confirms delivery. A later metadata-write failure is logged without changing the successful delivery result.
 
 ### Phase 5 configuration
 
@@ -375,6 +383,14 @@ Phase 5 should add environment-driven configuration such as:
 - `ELEVENLABS_TTS_MODEL`
 - `ELEVENLABS_TTS_OUTPUT_FORMAT`
 - `BOT_TTS_MAX_CHARS`
+- `ELEVENLABS_TTS_TIMEOUT_SECONDS`
+- `TELEGRAM_VOICE_REQUEST_TIMEOUT_SECONDS`
+
+Defaults: 3000 input characters, 45-second overall synthesis deadline, 60-second
+upload deadline, and a fixed 10 MiB transient-audio ceiling. The provider closes
+the SDK HTTP response on size errors, timeout, and cancellation; generation is
+never automatically retried. Missing `ELEVENLABS_API_KEY` disables TTS without
+affecting startup readiness. Supported formats are MP3 only in this milestone.
 
 These settings are not part of the Phase 1 required environment contract.
 

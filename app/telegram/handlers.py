@@ -55,7 +55,11 @@ class TelegramUpdateProcessor:
             await bot.send_message(chat_id=message.chat.id, text=reply.text)
             return
 
-        responder = TelegramResponseEmitter(bot=bot, chat_id=message.chat.id)
+        responder = TelegramResponseEmitter(
+            bot=bot,
+            chat_id=message.chat.id,
+            voice_request_timeout_seconds=self.settings.telegram_voice_request_timeout_seconds,
+        )
         reply = await self.chat_service.handle_inbound(inbound, responder=responder)
 
         if reply.delivered:

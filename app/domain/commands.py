@@ -8,6 +8,7 @@ SUPPORTED_COMMANDS = {
     "/settings",
     "/image",
     "/video",
+    "/tts",
 }
 
 ACCESS_DENIED_TEXT = "Access denied."
@@ -57,7 +58,8 @@ def render_start_message() -> str:
         "- text messages\n"
         "- one photo with an optional caption\n"
         "- /image followed by a prompt to generate one image\n"
-        "- /video followed by a prompt to generate one short video\n\n"
+        "- /video followed by a prompt to generate one short video\n"
+        "- /tts followed by Hindi text to generate a voice message\n\n"
         "Commands:\n"
         "/start\n"
         "/help\n"
@@ -65,7 +67,8 @@ def render_start_message() -> str:
         "/reset\n"
         "/settings\n"
         "/image <prompt>\n"
-        "/video <prompt>"
+        "/video <prompt>\n"
+        "/tts <Hindi text>"
     )
 
 
@@ -78,7 +81,8 @@ def render_help_message() -> str:
         "/reset - start a fresh conversation for this chat\n"
         "/settings - tune video, image, and chat presets\n"
         "/image <prompt> - generate one image with Gemini\n"
-        "/video <prompt> - queue one short video with the configured providers\n\n"
+        "/video <prompt> - queue one short video with the configured providers\n"
+        "/tts <Hindi text> - speak the supplied text as a voice message\n\n"
         "Supported inputs:\n"
         "- text messages\n"
         "- one photo with an optional caption\n\n"
@@ -95,16 +99,20 @@ def render_status_message(
     video_generation_enabled: bool,
     video_model: str,
     memory_enabled: bool,
+    tts_enabled: bool = False,
+    tts_model: str | None = None,
 ) -> str:
     memory_state = "enabled" if memory_enabled else "disabled"
     image_state = f"enabled ({image_model})" if image_generation_enabled else "disabled"
     video_state = f"enabled ({video_model})" if video_generation_enabled else "disabled"
+    speech_state = f"enabled ({tts_model})" if tts_enabled else "disabled"
     return (
         "Status\n"
         f"- update mode: {update_mode}\n"
         f"- chat model: {chat_model}\n"
         f"- image generation: {image_state}\n"
         f"- video generation: {video_state}\n"
+        f"- speech generation: {speech_state}\n"
         f"- memory: {memory_state}"
     )
 

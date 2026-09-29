@@ -11,6 +11,10 @@ GenerationJobStatus = Literal["queued", "running", "completed", "failed"]
 VideoProviderName = Literal["gemini", "runpod", "fal"]
 VideoProviderHint = Literal["auto", "gemini", "runpod", "fal"]
 FalVideoModelFamily = Literal["kling", "seedance", "gemini"]
+SpeechOutputFormat = Literal[
+    "mp3_22050_32", "mp3_44100_32", "mp3_44100_64",
+    "mp3_44100_96", "mp3_44100_128", "mp3_44100_192",
+]
 PreferenceType = Literal[
     "video",
     "video_provider",
@@ -165,6 +169,37 @@ class GeneratedImageResult:
     raw_model: str
     prompt: str
     caption: str | None = None
+
+
+@dataclass(slots=True)
+class SpeechGenerationRequest:
+    chat_id: int
+    user_id: int
+    text: str
+    voice_id: str
+    model: str
+    output_format: SpeechOutputFormat
+
+
+@dataclass(slots=True)
+class GeneratedSpeechResult:
+    audio_bytes: bytes = field(repr=False)
+    mime_type: str
+    provider: str
+    raw_model: str
+    voice_id: str
+    source_text: str = field(repr=False)
+    provider_message_id: str | None = None
+
+
+@dataclass(slots=True)
+class SentVoice:
+    telegram_message_id: int
+    telegram_file_id: str
+    telegram_file_unique_id: str
+    duration_seconds: int
+    mime_type: str | None
+    file_size: int | None
 
 
 @dataclass(slots=True)
@@ -349,3 +384,4 @@ class ServiceReply:
     settings_menu: SettingsMenu | None = None
     provider: str | None = None
     model: str | None = None
+    speech: GeneratedSpeechResult | None = field(default=None, repr=False)
