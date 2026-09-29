@@ -5,6 +5,8 @@ from typing import Protocol
 
 from app.domain.models import (
     GeneratedImageResult,
+    GeneratedSpeechResult,
+    SpeechGenerationRequest,
     GeneratedVideoResult,
     ImageGenerationRequest,
     ImageGenerationPollRequest,
@@ -69,6 +71,14 @@ class VideoGenerator(Protocol):
         request: VideoGenerationPollRequest,
     ) -> VideoJobPollResult:
         """Poll a previously submitted video generation job."""
+
+    async def close(self) -> None:
+        """Release provider resources."""
+
+
+class TextToSpeechProvider(Protocol):
+    async def generate_speech(self, request: SpeechGenerationRequest) -> GeneratedSpeechResult:
+        """Synthesize supplied text into transient audio bytes."""
 
     async def close(self) -> None:
         """Release provider resources."""

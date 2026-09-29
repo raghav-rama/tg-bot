@@ -13,7 +13,7 @@ Before making implementation decisions, read the local planning docs:
 - `docs/phase-1-5-draft-streaming.md` when working on Telegram partial-reply streaming
 - `docs/phase-2-vertex-image-generation.md` when working on generated image replies
 - `docs/phase-3-vertex-video-generation.md` when working on generated video replies
-- Phase 5 ElevenLabs TTS is tracked in `docs/roadmap.md` until a dedicated planning doc exists.
+- `docs/phase-5-elevenlabs-tts.md` when working on ElevenLabs speech generation
 
 Use `docs/roadmap.md` as the source of truth for:
 
@@ -21,7 +21,7 @@ Use `docs/roadmap.md` as the source of truth for:
 - whether a feature is current scope or planned scope
 - the exit criteria that define when the repo should move to the next phase
 
-The current repo plan has `Phase 5 - ElevenLabs Hindi Text To Speech` in progress in an isolated git worktree; `Phase 6 - Fal Video Provider Support` is accepted as complete and merged into `dev`; `Phase 4 - Hardening And Expansion` is accepted complete.
+The current repo plan has `Phase 5 - ElevenLabs Hindi Text To Speech` implemented in an isolated git worktree with live acceptance pending; `Phase 6 - Fal Video Provider Support` is accepted as complete and merged into `dev`; `Phase 4 - Hardening And Expansion` is accepted complete.
 
 Active worktrees:
 
@@ -29,7 +29,17 @@ Active worktrees:
 
 ## Current State
 
-As of `2026-07-06`, the repository is no longer docs-only. Phase 1, Phase 1.5, Phase 2, Phase 3, Phase 4, and Phase 6 are accepted as complete, and Phase 5 is in progress in a parallel worktree.
+As of `2026-09-19`, Phase 1, Phase 1.5, Phase 2, Phase 3, Phase 4, and Phase 6 are accepted as complete. Phase 5 is implemented in its worktree and remains `in_progress` until live Telegram acceptance.
+
+- `/tts <text>` now generates MP3 speech with the official ElevenLabs Python SDK and delivers it via Telegram `sendVoice`, replying to the originating command.
+- TTS defaults are voice `vIdhHAZdn1bGjKe1dFw8`, model `eleven_multilingual_v2`, format `mp3_44100_128`, 3000 characters, 45-second total generation timeout, and 60-second upload timeout; audio is limited to 10 MiB and remains transient.
+- Hindi is the documented target; mixed scripts are accepted. The supplied text is not rewritten, translated, or combined with chat history. Multilingual v2 does not support `language_code`, so the adapter omits that hint.
+- TTS is optional (`ELEVENLABS_API_KEY`); `/start`, `/help`, and `/status` expose it. Model, voice, output format, and limits are environment-only, with no `/settings` TTS menu.
+- TTS has an independent request lifecycle and survives newer messages and `/reset`. Atomic command-history claims prevent duplicate generation across redelivery, resets, and restarts; interrupted requests require a fresh command.
+- TTS command/outcome rows are excluded from OpenAI context. Structured logs contain provider and delivery metadata, never speech text or audio bytes. Upload failure never automatically regenerates speech; metadata failure after delivery never falsely reports upload failure.
+- Hermetic provider and ingestion tests use the actual ElevenLabs SDK with mocked HTTP and Telegram calls. Live Hindi pronunciation/playability acceptance remains pending.
+- A live ElevenLabs call on `2026-09-21` used the main worktree `.env` key and generated a valid 32,226-byte Hindi MP3 with the default model, voice, and output format. Live Telegram `sendVoice` playability remains pending.
+- SQLite transaction handling now rolls back and maps commit failures to `StorageError`, including failures while saving TTS metadata after a successful upload.
 
 - Phase 1 foundation code exists under `app/`.
 - Project metadata and dependency definitions exist in `pyproject.toml` and `uv.lock`.
@@ -86,7 +96,7 @@ If an unofficial tutorial conflicts with these sources, trust the official Teleg
 - Keep Telegram-specific logic separate from domain and provider logic.
 - Prefer polling-first implementation, while preserving a clean webhook path.
 - Treat text and single-image messages as the only supported v1 inputs unless the docs in this repo are updated.
-- Treat text replies, `/settings` inline-keyboard messages, `/image`-driven generated image replies, and `/video` generated video replies as the only supported outputs unless the docs in this repo are updated.
+- Treat text replies, `/settings` inline-keyboard messages, `/image` generated images, `/video` generated videos, and `/tts` voice messages as the supported outputs. Voice inputs/transcription remain unsupported.
 - Keep the bot private via an allowlist unless requirements change.
 - Do not treat roadmap items as implementation requirements until their phase becomes active in `docs/roadmap.md`.
 - Use tavily fetching up-to-date info about anything.

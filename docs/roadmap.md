@@ -8,7 +8,7 @@ This document separates the current repo state from the planned delivery phases.
 - `phase-1-5-draft-streaming.md` defines the Phase 1.5 draft-streaming work only.
 - `phase-2-vertex-image-generation.md` defines the completed Phase 2 image-generation work only.
 - `phase-3-vertex-video-generation.md` defines the completed Phase 3 video-generation work only.
-- Phase 5 ElevenLabs Hindi text-to-speech is tracked in this roadmap until it has a dedicated planning doc.
+- `phase-5-elevenlabs-tts.md` defines the ElevenLabs Hindi text-to-speech implementation and acceptance checks.
 - Phase 6 Fal provider support is tracked in this roadmap until it has a dedicated planning doc.
 - This roadmap tracks the broader direction, especially the later hardening and expansion work.
 
@@ -17,13 +17,15 @@ This document separates the current repo state from the planned delivery phases.
 - Active phases:
   - `Phase 5 - ElevenLabs Hindi Text To Speech`
 - Status: `in_progress`
-- Updated: `2026-07-05`
+- Updated: `2026-09-19`
 - Previous phase accepted: `Phase 4 - Hardening And Expansion`
 - `Phase 6 - Fal Video Provider Support` is accepted as complete and merged into `dev`.
 - Parallel implementation worktree:
   - Phase 5 branch: `phase-5-elevenlabs-tts`
   - Phase 5 path: `.worktrees/phase-5-elevenlabs-tts`
 - Evidence:
+  - Phase 5 `/tts` is implemented in its isolated worktree; live Hindi voice-message acceptance remains pending
+  - a live ElevenLabs provider request on `2026-09-21` generated a valid Hindi MP3 with the configured default model and voice; Telegram `sendVoice` playability remains pending
   - Phase 1 foundation work is accepted as complete for repo sequencing
   - Phase 1.5 draft streaming is accepted as complete and no longer blocks the next milestone
   - Phase 2 image generation is accepted as complete for repo sequencing
@@ -44,7 +46,9 @@ This document separates the current repo state from the planned delivery phases.
 
 ## Current State
 
-As of `2026-07-06`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, the completed Phase 3 video-generation slice, the completed Phase 4 hardening and expansion work, and the completed Phase 6 Fal video provider support merged into `dev`. Phase 5 ElevenLabs Hindi text-to-speech remains in progress in an isolated git worktree.
+As of `2026-09-19`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, the completed Phase 3 video-generation slice, the completed Phase 4 hardening and expansion work, and the completed Phase 6 Fal video provider support merged into `dev`. Phase 5 ElevenLabs Hindi text-to-speech is implemented in its isolated worktree and remains in progress pending live acceptance.
+
+- `/tts <text>` directly synthesizes speech with the official ElevenLabs Python SDK and sends an MP3 Telegram voice message. It uses independent asynchronous requests, command-history deduplication, and transient audio without a generation-job queue or database migration.
 
 - Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, OpenAI chat, Gemini image plus video generation, and optional Runpod/Fal video providers.
 - A polling-first runtime exists, and webhook mode now reuses the same shared processing path when enabled.
@@ -85,7 +89,7 @@ Build this in order:
 6. Add Hindi text-to-speech as a dedicated `/tts` command after Phase 4.
 7. Add Fal video provider support as a provider expansion of the existing `/video` job path.
 
-Phase 5 and Phase 6 are currently being implemented in parallel through isolated git worktrees because they touch separate provider surfaces: Phase 5 adds a new TTS command/provider path, while Phase 6 expands the existing queued video provider path.
+Phase 5 and Phase 6 started in separate worktrees because they touch separate provider surfaces. Phase 6 is merged; Phase 5's TTS implementation is now awaiting live acceptance in its worktree.
 
 This ordering keeps the first milestone small, then improves reply UX before introducing richer media.
 
@@ -291,42 +295,46 @@ Completion note:
 
 Status: `in_progress`
 
+Dedicated doc: [phase-5-elevenlabs-tts.md](phase-5-elevenlabs-tts.md).
+Implementation is present in the Phase 5 worktree; manual live acceptance is pending.
+
 Implementation worktree:
 
 - branch: `phase-5-elevenlabs-tts`
 - path: `.worktrees/phase-5-elevenlabs-tts`
-- baseline verification: `uv run pytest` passed with `133` tests
+- recreated from `dev` at `52d0464`; baseline verification passed with `180` tests
 
 ### Goal
 
 Let an allowed user send Hindi text through `/tts <text>` and receive generated speech back in Telegram without changing the normal OpenAI chat, `/image`, or `/video` paths.
 
-### Planned Scope
+### Implemented Scope
 
-- add an explicit `/tts <Hindi text>` command flow
-- generate speech through the ElevenLabs text-to-speech API
+- explicit `/tts <Hindi text>` command flow
+- speech generation through the official ElevenLabs Python SDK and text-to-speech API
 - default to the ElevenLabs voice ID `vIdhHAZdn1bGjKe1dFw8`
 - start with Hindi text only
 - deliver the generated speech through Telegram `sendVoice`
 - keep generated audio bytes transient and out of SQLite
-- persist only command text and lightweight delivery/provider metadata if persistence is needed
+- persist command and outcome rows, plus lightweight delivery/provider identifiers; keep richer delivery metadata in structured logs
 
 ### Design Notes
 
-- `/tts` should be a synchronous command path first, similar to `/image`, because short text-to-speech requests should not require the queued `/video` job model.
+- `/tts` directly awaits asynchronous synthesis and voice delivery without a persisted generation job. Both `/image` and `/video` use queued jobs; TTS is an independent request path.
 - Keep OpenAI chat, Vertex image/video generation, and ElevenLabs speech generation as separate provider interfaces.
 - Prefer Telegram voice-message delivery for the first milestone. If ElevenLabs output is MP3, current Telegram and aiogram behavior still supports sending it as a voice message; if an OGG/Opus output is selected later, verify the container and codec against Telegram before making it the default.
 - Use `eleven_multilingual_v2` as the initial quality-first model for Hindi unless latency or cost requires a switch to a faster model.
-- Pass a Hindi language hint such as `language_code="hi"` when supported by the selected SDK/API path.
+- Omit `language_code`: the default Multilingual v2 model supports Hindi but does not support this API parameter.
 - Keep the first input contract simple: the text after `/tts` is the speech text. Do not mix `/tts` with chat-history rewriting, prompt expansion, or translation in the first milestone.
 
-### Decisions Needed
+### Resolved Decisions
 
-- whether to reject non-Hindi or non-Devanagari input, or to trust the user and only document Hindi as supported
-- whether to store a dedicated generated-audio metadata table or only append command/message rows
-- whether to expose model and output-format configuration beyond environment variables
-- whether repeated identical TTS outputs should reuse Telegram `file_id`
-- maximum accepted text length for the first release
+- Trust supplied text and document Hindi as supported; do not enforce Devanagari.
+- Use existing command/message rows; no generated-audio table or binary storage.
+- Model, voice, MP3 output format, and limits are environment-only.
+- Reusing Telegram `file_id` across distinct commands is deferred; duplicate delivery of the same inbound message is suppressed using an atomic persisted claim.
+- Default maximum input is 3000 characters, total generation timeout is 45 seconds, voice upload timeout is 60 seconds, and audio ceiling is 10 MiB.
+- Every accepted TTS request finishes independently of subsequent messages or `/reset`; no automatic retries or restart recovery.
 
 ### Exit Criteria
 

@@ -43,6 +43,7 @@ from app.domain.errors import (
     ValidationError,
 )
 from app.domain.interfaces import DraftSession, ResponseEmitter
+from app.domain.tts import TextToSpeechService
 from app.domain.models import (
     ConversationRecord,
     GeneratedImageResult,
@@ -79,7 +80,7 @@ from app.observability import (
     estimate_openai_usage,
     estimate_video_usage,
 )
-from app.providers.base import AIProvider, ImageGenerator, VideoGenerator
+from app.providers.base import AIProvider, ImageGenerator, VideoGenerator, TextToSpeechProvider
 from app.storage.conversations import ConversationRepository
 from app.storage.generation_jobs import GenerationJobRepository
 from app.storage.generated_images import GeneratedImageRepository
@@ -135,6 +136,7 @@ class ChatService:
         generation_jobs: GenerationJobRepository | None = None,
         video_generator: VideoGenerator | None = None,
         preferences: PreferenceRepository | None = None,
+        speech_provider: TextToSpeechProvider | None = None,
     ) -> None:
         self.settings = settings
         self.conversations = conversations
@@ -145,6 +147,9 @@ class ChatService:
         self.generation_jobs = generation_jobs
         self.video_generator = video_generator
         self.preferences = preferences
+        self.tts_service = TextToSpeechService(
+            settings=settings, conversations=conversations, messages=messages, provider=speech_provider,
+        )
         self.logger = logging.getLogger("app.domain.services")
         self._active_runs: dict[int, _ActiveRun] = {}
         self._active_runs_lock = asyncio.Lock()
@@ -172,6 +177,12 @@ class ChatService:
                 responder=responder,
                 active_run=None,
                 message=message,
+            )
+
+        if message.message_type == "command" and (message.command or "").lower() == "/tts":
+            reply = await self.tts_service.handle(message, responder=responder)
+            return await self._deliver_reply(
+                reply=reply, responder=responder, active_run=None, message=message,
             )
 
         active_run = await self._begin_run(message.chat_id)
@@ -551,6 +562,8 @@ class ChatService:
                 video_generation_enabled=self.settings.video_generation_enabled,
                 video_model=self._video_status_model(),
                 memory_enabled=self.settings.bot_history_max_turns > 0,
+                tts_enabled=self.tts_service.provider is not None,
+                tts_model=self.settings.elevenlabs_tts_model,
             )
             preferences = await self._preferences_for_user(
                 chat_id=message.chat_id,

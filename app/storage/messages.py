@@ -24,6 +24,42 @@ class MessageRepository:
     def __init__(self, database: Database) -> None:
         self.database = database
 
+    async def claim_tts_command(
+        self,
+        *,
+        conversation_id: int,
+        chat_id: int,
+        telegram_message_id: int,
+        text: str,
+        created_at: datetime,
+    ) -> bool:
+        """Claim once across all conversations, including those archived by reset.
+
+        BEGIN IMMEDIATE serializes the check and insert across connections too.
+        The persisted command is the claim; failed/interrupted requests require
+        a new Telegram message rather than an automatic paid retry.
+        """
+        async with self.database.transaction() as connection:
+            cursor = await connection.execute(
+                """
+                INSERT INTO messages (
+                    conversation_id, telegram_message_id, role, message_type, text, created_at
+                )
+                SELECT ?, ?, 'user', 'command', ?, ?
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM messages m
+                    JOIN conversations c ON c.id = m.conversation_id
+                    WHERE c.chat_id = ? AND m.telegram_message_id = ?
+                      AND m.role = 'user' AND m.message_type = 'command'
+                )
+                """,
+                (conversation_id, telegram_message_id, text, _iso(created_at),
+                 chat_id, telegram_message_id),
+            )
+            claimed = cursor.rowcount == 1
+            await cursor.close()
+            return claimed
+
     async def add_user_message(
         self,
         *,
@@ -76,6 +112,7 @@ class MessageRepository:
         text: str | None,
         message_type: str = "text",
         created_at: datetime | None = None,
+        telegram_message_id: int | None = None,
     ) -> int:
         async with self.database.transaction() as connection:
             cursor = await connection.execute(
@@ -94,10 +131,11 @@ class MessageRepository:
                     image_byte_size,
                     created_at
                 )
-                VALUES (?, NULL, ?, 'assistant', ?, ?, NULL, NULL, NULL, NULL, NULL, ?)
+                VALUES (?, ?, ?, 'assistant', ?, ?, NULL, NULL, NULL, NULL, NULL, ?)
                 """,
                 (
                     conversation_id,
+                    telegram_message_id,
                     provider_message_id,
                     message_type,
                     text,

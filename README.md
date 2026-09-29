@@ -1,10 +1,10 @@
 # tg-bot
 
-Private Telegram bot built with FastAPI, SQLite, OpenAI chat, Gemini Developer API image/video generation, Runpod video fallback, and Fal video provider support.
+Private Telegram bot built with FastAPI, SQLite, OpenAI chat, Gemini Developer API image/video generation, Runpod/Fal video providers, and ElevenLabs speech generation.
 
 ## Status
 
-The repository has completed `Phase 4 - Hardening And Expansion` and `Phase 6 - Fal Video Provider Support` (merged into `dev`). `Phase 5 - ElevenLabs Hindi Text To Speech` is in progress in an isolated git worktree.
+The repository has completed `Phase 4 - Hardening And Expansion` and `Phase 6 - Fal Video Provider Support` (merged into `dev`). `Phase 5 - ElevenLabs Hindi Text To Speech` is implemented in its isolated worktree; live Telegram acceptance remains pending.
 
 Active worktrees:
 
@@ -34,6 +34,7 @@ Local planning docs remain the source of truth for scope and sequencing:
 - [docs/phase-1-5-draft-streaming.md](docs/phase-1-5-draft-streaming.md)
 - [docs/phase-2-vertex-image-generation.md](docs/phase-2-vertex-image-generation.md)
 - [docs/phase-3-vertex-video-generation.md](docs/phase-3-vertex-video-generation.md)
+- [docs/phase-5-elevenlabs-tts.md](docs/phase-5-elevenlabs-tts.md)
 
 ## What The Bot Supports
 
@@ -43,13 +44,14 @@ Inbound inputs:
 - one photo with an optional caption
 - one photo with a caption that starts with `/image <prompt>` or `/video <prompt>`
 - text `/image` or `/video` commands that reply to one Telegram photo
-- commands: `/start`, `/help`, `/status`, `/reset`, `/settings`, `/image`, `/video`
+- commands: `/start`, `/help`, `/status`, `/reset`, `/settings`, `/image`, `/video`, `/tts`
 
 Outbound outputs:
 
 - normal text replies
 - generated images through Telegram `sendPhoto`
 - generated videos through Telegram `sendVideo`
+- generated speech through Telegram `sendVoice`
 
 Current constraints:
 
@@ -57,7 +59,7 @@ Current constraints:
 - draft streaming targets private text chats first
 - image-understanding requests use the final-only reply path by default
 - webhook mode requires a public HTTPS URL and validates `X-Telegram-Bot-Api-Secret-Token`
-- raw generated image and video bytes are not persisted in SQLite
+- raw generated image, video, and speech bytes are not persisted in SQLite
 - queued reference-photo jobs persist Telegram photo metadata plus `file_id`; raw reference photo bytes are re-downloaded by the worker when needed and are not persisted in SQLite
 - `/image` and `/video` both acknowledge immediately, persist a queued job, and deliver the final media later from the background worker
 - live Telegram, Gemini, Runpod, and Fal verification still depends on real credentials and manual runtime checks
@@ -86,6 +88,7 @@ The runtime is split so Telegram transport stays separate from domain and provid
 - Gemini API key configuration for `/image` and default `/video`
 - optional Runpod configuration for `/video` fallback
 - optional Fal configuration for `/video` provider expansion
+- optional ElevenLabs API key for `/tts` voice messages
 
 ## Quick Start
 
@@ -121,6 +124,15 @@ OPENAI_TIMEOUT_SECONDS=45
 # Optional log-only cost estimates; keep unset or 0 to disable.
 # OPENAI_INPUT_COST_PER_1M_TOKENS_USD=0
 # OPENAI_OUTPUT_COST_PER_1M_TOKENS_USD=0
+
+# Optional ElevenLabs speech generation for /tts
+# ELEVENLABS_API_KEY=your-elevenlabs-api-key
+# ELEVENLABS_TTS_VOICE_ID=vIdhHAZdn1bGjKe1dFw8
+# ELEVENLABS_TTS_MODEL=eleven_multilingual_v2
+# ELEVENLABS_TTS_OUTPUT_FORMAT=mp3_44100_128
+# BOT_TTS_MAX_CHARS=3000
+# ELEVENLABS_TTS_TIMEOUT_SECONDS=45
+# TELEGRAM_VOICE_REQUEST_TIMEOUT_SECONDS=60
 
 # Optional Gemini configuration for /image and /video
 GEMINI_API_KEY=your-gemini-api-key
@@ -184,6 +196,49 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 With `APP_UPDATE_MODE=polling`, FastAPI starts the Telegram polling runtime during application startup.
+
+## Hindi Speech With `/tts`
+
+Set `ELEVENLABS_API_KEY` and restart the app, then send:
+
+```text
+/tts नमस्ते, आपका स्वागत है।
+```
+
+The bot speaks the text after the command and sends an MP3 voice message as a reply.
+Hindi is the supported target, but mixed Hindi/Latin scripts are accepted. Text is
+not rewritten or translated and does not use conversation history. The default
+3000-character limit applies to the trimmed speech text; longer text is rejected
+without truncation or a provider call.
+
+The defaults use voice `vIdhHAZdn1bGjKe1dFw8` and `eleven_multilingual_v2`. The voice
+must be accessible to your ElevenLabs account. Multilingual v2 supports Hindi but
+does not accept `language_code`, so the adapter omits that hint. Only MP3 output
+formats are accepted: `mp3_22050_32` and `mp3_44100_32/64/96/128/192` (each bitrate is
+a separate value, for example `mp3_44100_64`). Higher-bitrate formats may require a
+different ElevenLabs subscription. Model, voice, format, and limits are configured
+through environment variables; there is no TTS submenu in `/settings`.
+
+Generation runs directly with asynchronous I/O, bounded by 45 seconds overall and
+10 MiB of audio. Uploads have a separate 60-second timeout. You can keep chatting or
+send another `/tts` while synthesis runs; each accepted request finishes independently.
+`/reset` starts fresh chat history and does not cancel speech already requested.
+
+SQLite records the command before contacting ElevenLabs. Repeated delivery of the
+same Telegram message is ignored, including after a restart or `/reset`. A fresh
+command is required to retry a failed or interrupted request. There is no automatic
+generation retry or restart recovery. If upload confirmation is lost, check the chat
+before retrying because Telegram may already have received the voice message.
+
+Audio bytes stay in memory only. Command outcomes are stored outside chat context;
+structured logs record timing, size, model, voice, and Telegram delivery identifiers.
+Logs do not record source text or audio, and no cost estimate is enabled for TTS.
+`/status` reports whether speech is configured; this is not a live credential check.
+The bot can start with TTS disabled when the ElevenLabs key is absent.
+
+Automated tests use the real SDK with mocked HTTP and Telegram responses. Phase 5
+acceptance still requires a configured manual check that the returned voice is
+playable and the Hindi pronunciation is suitable.
 
 ## Continuous Integration
 
@@ -425,4 +480,4 @@ uv.lock
 - distributed workers and external job queues are out of scope today
 - per-user/per-chat quotas, daily media budget caps, prompt/reference-image moderation gates, and in-app provider-output URL retention/expiry handling were deferred out of completed Phase 4 and remain future work unless the roadmap changes
 - Fal-hosted video provider support is accepted as complete and merged into `dev` for `Phase 6 - Fal Video Provider Support`, with Kling, Seedance, and Gemini Omni Flash model families available behind the existing queued `/video` path and per-family selection in `/settings`
-- Phase 5 ElevenLabs Hindi text-to-speech remains in progress in a separate worktree
+- Phase 5 ElevenLabs Hindi text-to-speech is implemented in a separate worktree; live acceptance remains pending
