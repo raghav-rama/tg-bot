@@ -6,14 +6,16 @@ import logging
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
-from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters
 
 from app.domain.errors import DraftRateLimitedError
 from app.domain.interfaces import DraftSession, ResponseEmitter
 from app.domain.models import (
     GeneratedImageResult,
+    GeneratedSpeechResult,
     GeneratedVideoResult,
     SentPhoto,
+    SentVoice,
     SentVideo,
     SettingsMenu,
 )
@@ -75,10 +77,12 @@ class TelegramResponseEmitter:
         bot: Bot,
         chat_id: int,
         video_request_timeout_seconds: int | None = None,
+        voice_request_timeout_seconds: int = 60,
     ) -> None:
         self.bot = bot
         self.chat_id = chat_id
         self.video_request_timeout_seconds = video_request_timeout_seconds
+        self.voice_request_timeout_seconds = voice_request_timeout_seconds
         self.logger = logging.getLogger("app.telegram.drafts")
 
     async def send_text(
@@ -162,6 +166,30 @@ class TelegramResponseEmitter:
             duration_seconds=sent_video.duration,
             mime_type=sent_video.mime_type,
             file_size=sent_video.file_size,
+        )
+
+    async def send_voice(
+        self, speech: GeneratedSpeechResult, *, reply_to_message_id: int,
+    ) -> SentVoice:
+        message = await self.bot.send_voice(
+            chat_id=self.chat_id,
+            voice=BufferedInputFile(speech.audio_bytes, filename="speech.mp3"),
+            reply_parameters=ReplyParameters(
+                message_id=reply_to_message_id,
+                allow_sending_without_reply=True,
+            ),
+            request_timeout=self.voice_request_timeout_seconds,
+        )
+        if message.voice is None:
+            raise RuntimeError("Telegram did not return voice metadata")
+        voice = message.voice
+        return SentVoice(
+            telegram_message_id=message.message_id,
+            telegram_file_id=voice.file_id,
+            telegram_file_unique_id=voice.file_unique_id,
+            duration_seconds=voice.duration,
+            mime_type=voice.mime_type,
+            file_size=voice.file_size,
         )
 
     async def open_draft(self) -> DraftSession:

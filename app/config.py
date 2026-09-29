@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from app.domain.models import SpeechOutputFormat
+
 
 class _FalModelFamilyHelper:
     """Helpers for mapping a concrete Fal endpoint to a family label."""
@@ -46,6 +48,24 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(alias="TELEGRAM_BOT_TOKEN")
     openai_api_key: SecretStr = Field(alias="OPENAI_API_KEY")
     telegram_allowed_user_ids: str = Field(alias="TELEGRAM_ALLOWED_USER_IDS")
+
+    elevenlabs_api_key: SecretStr | None = Field(default=None, alias="ELEVENLABS_API_KEY")
+    elevenlabs_tts_voice_id: str = Field(
+        default="vIdhHAZdn1bGjKe1dFw8", alias="ELEVENLABS_TTS_VOICE_ID",
+    )
+    elevenlabs_tts_model: str = Field(
+        default="eleven_multilingual_v2", alias="ELEVENLABS_TTS_MODEL",
+    )
+    elevenlabs_tts_output_format: SpeechOutputFormat = Field(
+        default="mp3_44100_128", alias="ELEVENLABS_TTS_OUTPUT_FORMAT",
+    )
+    bot_tts_max_chars: int = Field(default=3000, gt=0, alias="BOT_TTS_MAX_CHARS")
+    elevenlabs_tts_timeout_seconds: float = Field(
+        default=45.0, gt=0, allow_inf_nan=False, alias="ELEVENLABS_TTS_TIMEOUT_SECONDS",
+    )
+    telegram_voice_request_timeout_seconds: int = Field(
+        default=60, gt=0, alias="TELEGRAM_VOICE_REQUEST_TIMEOUT_SECONDS",
+    )
 
     app_env: str = Field(default="development", alias="APP_ENV")
     app_log_level: str = Field(default="INFO", alias="APP_LOG_LEVEL")
@@ -371,7 +391,7 @@ class Settings(BaseSettings):
         normalized = value.strip()
         return normalized or None
 
-    @field_validator("telegram_webhook_secret_token", "gemini_api_key", "google_api_key", "runpod_api_key", "fal_key", mode="before")
+    @field_validator("telegram_webhook_secret_token", "gemini_api_key", "google_api_key", "runpod_api_key", "fal_key", "elevenlabs_api_key", mode="before")
     @classmethod
     def normalize_optional_secret(
         cls,
@@ -385,6 +405,18 @@ class Settings(BaseSettings):
             else str(value)
         ).strip()
         return secret or None
+
+    @field_validator("elevenlabs_tts_voice_id", "elevenlabs_tts_model")
+    @classmethod
+    def validate_tts_identifiers(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("TTS voice and model must not be empty")
+        return normalized
+
+    @property
+    def tts_enabled(self) -> bool:
+        return self.elevenlabs_api_key is not None
 
     @field_validator("telegram_webhook_url")
     @classmethod

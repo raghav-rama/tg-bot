@@ -166,14 +166,15 @@ class Database:
             try:
                 await connection.execute("BEGIN IMMEDIATE")
                 yield connection
+                # Commit can fail too (e.g. disk full). Roll it back and expose
+                # the same StorageError contract as statement failures.
+                await connection.commit()
             except aiosqlite.Error as exc:
                 await connection.rollback()
                 raise StorageError("SQLite transaction failed") from exc
             except Exception:
                 await connection.rollback()
                 raise
-            else:
-                await connection.commit()
 
     async def _run_migrations(self, connection: aiosqlite.Connection) -> None:
         await self._ensure_generation_jobs_column(

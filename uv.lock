@@ -526,11 +526,28 @@ wheels = [
 ]
 
 [[package]]
+name = "elevenlabs"
+version = "2.68.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "requests" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/40/60/9bc77b0c6657c31f046a3a9dadba3ed99bcaf36bfffaada5c05abdfee63f/elevenlabs-2.68.0.tar.gz", hash = "sha256:21c4cef15d2f0afe1687f551b8cf57cf64a8547ec57abd0e1142f9749d4bd002", size = 812638, upload-time = "2026-09-11T16:00:19.118Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/28/12/f34cbf1feba57405510262679262057bbb390999e7b512343cd76d83a412/elevenlabs-2.68.0-py3-none-any.whl", hash = "sha256:061e79126819f40c61442d75c098c27744ba36ed3e0f6162db6fb1ba423ed878", size = 2143179, upload-time = "2026-09-11T16:00:17.159Z" },
+]
+
+[[package]]
 name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -1678,6 +1695,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiogram" },
     { name = "aiosqlite" },
+    { name = "elevenlabs" },
     { name = "fal-client" },
     { name = "fastapi" },
     { name = "google-cloud-storage" },
@@ -1698,6 +1716,7 @@ dev = [
 requires-dist = [
     { name = "aiogram", specifier = ">=3.26.0,<4.0.0" },
     { name = "aiosqlite", specifier = ">=0.21.0,<1.0.0" },
+    { name = "elevenlabs", specifier = ">=2.68.0,<3.0.0" },
     { name = "fal-client", specifier = ">=0.14.0,<0.15.0" },
     { name = "fastapi", specifier = ">=0.128.0,<1.0.0" },
     { name = "google-cloud-storage", specifier = ">=3.3.0,<4.0.0" },

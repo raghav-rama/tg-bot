@@ -12,7 +12,8 @@ from app.api.webhook import router as webhook_router
 from app.config import Settings
 from app.domain.services import ChatService
 from app.logging import configure_logging, log_kv
-from app.providers.base import AIProvider, ImageGenerator, VideoGenerator
+from app.providers.base import AIProvider, ImageGenerator, VideoGenerator, TextToSpeechProvider
+from app.providers.elevenlabs_provider import ElevenLabsProvider
 from app.providers.openai_provider import OpenAIProvider
 from app.providers.fal_video_provider import FalVideoProvider
 from app.providers.runpod_video_provider import RunpodVideoProvider
@@ -43,6 +44,7 @@ class AppContainer:
     provider: AIProvider | None = None
     image_generator: ImageGenerator | None = None
     video_generator: VideoGenerator | None = None
+    speech_provider: TextToSpeechProvider | None = None
     chat_service: ChatService | None = None
     telegram_runtime: TelegramRuntime | None = None
     video_job_worker: VideoJobWorker | None = None
@@ -85,6 +87,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 timeout_seconds=loaded_settings.openai_timeout_seconds,
             )
             container.provider = provider
+            speech_provider = None
+            if loaded_settings.elevenlabs_api_key is not None:
+                speech_provider = ElevenLabsProvider(
+                    api_key=loaded_settings.elevenlabs_api_key.get_secret_value(),
+                    timeout_seconds=loaded_settings.elevenlabs_tts_timeout_seconds,
+                )
+                container.speech_provider = speech_provider
             image_generator = None
             if loaded_settings.gemini_image_generation_enabled and loaded_settings.google_media_api_key is not None:
                 image_generator = GeminiImageProvider(
@@ -166,6 +175,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 generation_jobs=generation_jobs,
                 video_generator=video_generator,
                 preferences=preferences,
+                speech_provider=speech_provider,
             )
             container.chat_service = chat_service
             processor = TelegramUpdateProcessor(
@@ -248,6 +258,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     video_provider_order=",".join(loaded_settings.video_provider_order),
                     video_poll_interval_seconds=loaded_settings.video_job_poll_interval_seconds,
                     log_format=loaded_settings.app_log_format,
+                    tts_enabled=loaded_settings.tts_enabled,
+                    tts_model=loaded_settings.elevenlabs_tts_model if loaded_settings.tts_enabled else None,
                 )
             )
         except SettingsValidationError as exc:
@@ -271,6 +283,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await shutdown_container.telegram_runtime.close()
             if shutdown_container.provider is not None:
                 await shutdown_container.provider.close()
+            if shutdown_container.speech_provider is not None:
+                await shutdown_container.speech_provider.close()
             if shutdown_container.image_generator is not None:
                 await shutdown_container.image_generator.close()
             if shutdown_container.video_generator is not None:
