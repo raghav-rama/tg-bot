@@ -29,6 +29,8 @@ Active worktrees:
 
 ## Current State
 
+- Runtime update on `2026-09-30`: Railway dev and production deploy the merged TTS implementation, and the user confirmed live Telegram `/tts` playback. Both environments now override `ELEVENLABS_TTS_MODEL=eleven_v4`; the checked-in default remains `eleven_multilingual_v2`. A live Hindi v4 request succeeded through the existing SDK adapter with the current voice and MP3 format. Plain-text command inputs remain unchanged; v4 additionally interprets audio tags and does not support SSML. Both Railway environments override `BOT_TTS_MAX_CHARS=10000` and `ELEVENLABS_TTS_TIMEOUT_SECONDS=180`; checked-in defaults remain 3000 characters and 45 seconds. Long scripts must be sent as separate `/tts` commands within Telegram's 4096-character message limit (4091 characters after the `/tts ` prefix); messages are not automatically joined.
+
 As of `2026-09-19`, Phase 1, Phase 1.5, Phase 2, Phase 3, Phase 4, and Phase 6 are accepted as complete. Phase 5 is implemented in its worktree and remains `in_progress` until live Telegram acceptance.
 
 - `/tts <text>` now generates MP3 speech with the official ElevenLabs Python SDK and delivers it via Telegram `sendVoice`, replying to the originating command.
