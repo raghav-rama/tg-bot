@@ -21,6 +21,22 @@ T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
+class TtsDeliveryPreset:
+    id: str
+    label: str
+
+
+TTS_DELIVERY_PRESETS = {
+    "audio": TtsDeliveryPreset(id="audio", label="🎵 MP3 audio file"),
+    "voice": TtsDeliveryPreset(id="voice", label="🎙️ Voice message"),
+}
+
+
+def tts_delivery_preset_for(preset_id: str | None) -> TtsDeliveryPreset:
+    return TTS_DELIVERY_PRESETS.get(preset_id, TTS_DELIVERY_PRESETS["audio"])
+
+
+@dataclass(frozen=True, slots=True)
 class VideoProviderPreset:
     id: str
     label: str
@@ -299,6 +315,7 @@ _FAL_FAMILY_LABELS: dict[FalVideoModelFamily, str] = {
 }
 
 SETTABLE_PREFERENCE_TYPES: tuple[PreferenceType, ...] = (
+    "tts_delivery",
     "video_provider",
     "video_duration",
     "video_orientation",
@@ -406,6 +423,7 @@ def settings_menu_for(
                     SettingsButton("🖼️ Image", "prefs:menu:image"),
                     SettingsButton("💬 Chat", "prefs:menu:chat"),
                 ),
+                (SettingsButton("🔊 TTS delivery", "prefs:menu:tts_delivery"),),
             )
         )
 
@@ -437,6 +455,8 @@ def settings_menu_for(
         )
         return SettingsMenu(rows=tuple(rows))
 
+    if preference_type == "tts_delivery":
+        active_preset_id = tts_delivery_preset_for(active_preset_id).id
     preset_map = _preset_map_for(preference_type, settings=resolved_settings)
     rows: list[tuple[SettingsButton, ...]] = []
     for preset_id, preset in preset_map.items():
@@ -488,6 +508,7 @@ def active_settings_summary(
     resolved_settings = settings or _Settings()
     return (
         "Settings\n"
+        f"- TTS delivery: {_label_for_preference('tts_delivery', preferences.get('tts_delivery'), settings=resolved_settings)}\n"
         f"- Video provider: {_label_for_preference('video_provider', preferences.get('video_provider'), settings=resolved_settings)}\n"
         f"- Video duration: {_label_for_preference('video_duration', preferences.get('video_duration'), settings=resolved_settings)}\n"
         f"- Video aspect ratio: {_label_for_preference('video_orientation', preferences.get('video_orientation'), settings=resolved_settings)}\n"
@@ -507,6 +528,8 @@ def _label_for_preference(
     *,
     settings: _Settings | None = None,
 ) -> str:
+    if preference_type == "tts_delivery":
+        return tts_delivery_preset_for(preference.preset_id if preference else None).label
     if preference is None:
         return "Environment default"
     preset = preset_for_preference(
@@ -524,6 +547,8 @@ def _preset_map_for(
     *,
     settings: _Settings | None = None,
 ) -> Mapping[str, object]:
+    if preference_type == "tts_delivery":
+        return TTS_DELIVERY_PRESETS
     if preference_type == "video_provider":
         return VIDEO_PROVIDER_PRESETS
     if preference_type == "video_duration":

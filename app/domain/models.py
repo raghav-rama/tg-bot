@@ -16,6 +16,7 @@ SpeechOutputFormat = Literal[
     "mp3_44100_96", "mp3_44100_128", "mp3_44100_192",
 ]
 PreferenceType = Literal[
+    "tts_delivery",
     "video",
     "video_provider",
     "video_duration",
@@ -194,6 +195,16 @@ class GeneratedSpeechResult:
 
 @dataclass(slots=True)
 class SentVoice:
+    telegram_message_id: int
+    telegram_file_id: str
+    telegram_file_unique_id: str
+    duration_seconds: int
+    mime_type: str | None
+    file_size: int | None
+
+
+@dataclass(slots=True)
+class SentAudio:
     telegram_message_id: int
     telegram_file_id: str
     telegram_file_unique_id: str

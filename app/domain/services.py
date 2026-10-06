@@ -149,6 +149,7 @@ class ChatService:
         self.preferences = preferences
         self.tts_service = TextToSpeechService(
             settings=settings, conversations=conversations, messages=messages, provider=speech_provider,
+            preferences=preferences,
         )
         self.logger = logging.getLogger("app.domain.services")
         self._active_runs: dict[int, _ActiveRun] = {}

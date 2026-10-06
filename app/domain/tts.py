@@ -8,15 +8,17 @@ from app.domain.commands import GENERIC_FAILURE_TEXT
 from app.domain.errors import StorageError
 from app.domain.interfaces import ResponseEmitter
 from app.domain.models import InboundMessage, ServiceReply, SpeechGenerationRequest
+from app.domain.preferences import tts_delivery_preset_for
 from app.logging import log_kv
 from app.providers.base import TextToSpeechProvider
 from app.storage.conversations import ConversationRepository
 from app.storage.messages import MessageRepository
+from app.storage.preferences import PreferenceRepository
 
 TTS_USAGE_TEXT = "Use /tts followed by Hindi text, for example: /tts नमस्ते, आपका स्वागत है।"
 TTS_NOT_CONFIGURED_TEXT = "Speech generation is not configured right now."
 TTS_GENERATION_RETRY_TEXT = "I couldn't generate speech just now. Please send a new /tts command to try again."
-TTS_DELIVERY_RETRY_TEXT = "I couldn't confirm sending your voice message. Check this chat before sending a new /tts command."
+TTS_DELIVERY_RETRY_TEXT = "I couldn't confirm sending your audio. Check this chat before sending a new /tts command."
 
 
 class TextToSpeechService:
@@ -29,11 +31,13 @@ class TextToSpeechService:
         conversations: ConversationRepository,
         messages: MessageRepository,
         provider: TextToSpeechProvider | None,
+        preferences: PreferenceRepository | None = None,
     ) -> None:
         self.settings = settings
         self.conversations = conversations
         self.messages = messages
         self.provider = provider
+        self.preferences = preferences
         self.logger = logging.getLogger("app.domain.tts")
 
     async def handle(
@@ -78,6 +82,14 @@ class TextToSpeechService:
                 await self._record_outcome(conversation_id, reply.text, fields=fields)
                 return reply
 
+            preference = (
+                await self.preferences.get_preference(
+                    chat_id=message.chat_id, user_id=message.user_id, preference_type="tts_delivery",
+                )
+                if self.preferences is not None else None
+            )
+            delivery = tts_delivery_preset_for(preference.preset_id if preference else None).id
+            fields["delivery"] = delivery
             self.logger.info(log_kv("tts_generation_started", **fields))
             speech = await self.provider.generate_speech(SpeechGenerationRequest(
                 chat_id=message.chat_id,
@@ -104,7 +116,8 @@ class TextToSpeechService:
         if responder is None:
             return ServiceReply(text="", speech=speech, provider=speech.provider, model=speech.raw_model)
         try:
-            sent = await responder.send_voice(speech, reply_to_message_id=message.telegram_message_id)
+            send = responder.send_voice if delivery == "voice" else responder.send_audio
+            sent = await send(speech, reply_to_message_id=message.telegram_message_id)
         except Exception as exc:
             self.logger.warning(log_kv(
                 "tts_delivery_failed", **fields, error_type=type(exc).__name__,
@@ -115,7 +128,7 @@ class TextToSpeechService:
                 conversation_id, TTS_DELIVERY_RETRY_TEXT, fields=fields,
                 provider_message_id=speech.provider_message_id,
             )
-            return ServiceReply(text=TTS_DELIVERY_RETRY_TEXT, error_type="VoiceDeliveryError")
+            return ServiceReply(text=TTS_DELIVERY_RETRY_TEXT, error_type="SpeechDeliveryError")
 
         usage = dict(
             text_chars=len(text), audio_bytes=len(speech.audio_bytes),
@@ -124,7 +137,7 @@ class TextToSpeechService:
         self.logger.info(log_kv(
             "tts_delivered", **fields,
             provider_message_id=speech.provider_message_id,
-            telegram_voice_message_id=sent.telegram_message_id,
+            telegram_delivery_message_id=sent.telegram_message_id,
             telegram_file_id=sent.telegram_file_id,
             telegram_file_unique_id=sent.telegram_file_unique_id,
             duration_seconds=sent.duration_seconds,
