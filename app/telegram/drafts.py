@@ -14,9 +14,10 @@ from app.domain.models import (
     GeneratedImageResult,
     GeneratedSpeechResult,
     GeneratedVideoResult,
+    SentAudio,
     SentPhoto,
-    SentVoice,
     SentVideo,
+    SentVoice,
     SettingsMenu,
 )
 from app.logging import log_kv
@@ -190,6 +191,30 @@ class TelegramResponseEmitter:
             duration_seconds=voice.duration,
             mime_type=voice.mime_type,
             file_size=voice.file_size,
+        )
+
+    async def send_audio(
+        self, speech: GeneratedSpeechResult, *, reply_to_message_id: int,
+    ) -> SentAudio:
+        message = await self.bot.send_audio(
+            chat_id=self.chat_id,
+            audio=BufferedInputFile(speech.audio_bytes, filename="speech.mp3"),
+            reply_parameters=ReplyParameters(
+                message_id=reply_to_message_id,
+                allow_sending_without_reply=True,
+            ),
+            request_timeout=self.voice_request_timeout_seconds,
+        )
+        if message.audio is None:
+            raise RuntimeError("Telegram did not return audio metadata")
+        audio = message.audio
+        return SentAudio(
+            telegram_message_id=message.message_id,
+            telegram_file_id=audio.file_id,
+            telegram_file_unique_id=audio.file_unique_id,
+            duration_seconds=audio.duration,
+            mime_type=audio.mime_type,
+            file_size=audio.file_size,
         )
 
     async def open_draft(self) -> DraftSession:

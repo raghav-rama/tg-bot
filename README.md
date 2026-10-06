@@ -51,7 +51,7 @@ Outbound outputs:
 - normal text replies
 - generated images through Telegram `sendPhoto`
 - generated videos through Telegram `sendVideo`
-- generated speech through Telegram `sendVoice`
+- generated MP3 speech through Telegram `sendAudio`, with optional `sendVoice` delivery
 
 Current constraints:
 
@@ -88,7 +88,7 @@ The runtime is split so Telegram transport stays separate from domain and provid
 - Gemini API key configuration for `/image` and default `/video`
 - optional Runpod configuration for `/video` fallback
 - optional Fal configuration for `/video` provider expansion
-- optional ElevenLabs API key for `/tts` voice messages
+- optional ElevenLabs API key for `/tts` speech
 
 ## Quick Start
 
@@ -205,7 +205,11 @@ Set `ELEVENLABS_API_KEY` and restart the app, then send:
 /tts नमस्ते, आपका स्वागत है।
 ```
 
-The bot speaks the text after the command and sends an MP3 voice message as a reply.
+The bot speaks the text after the command and sends `speech.mp3` as an audio
+attachment with Telegram's audio player, replying to the command. Open `/settings`
+→ **TTS delivery** to choose **MP3 audio file** (default) or **Voice message**.
+The selection is saved per chat/user and survives `/reset` and app restarts.
+Each request uses the delivery setting selected when generation starts.
 Hindi is the supported target, but mixed Hindi/Latin scripts are accepted. Text is
 not rewritten or translated and does not use conversation history. The default
 3000-character limit applies to the trimmed speech text; longer text is rejected
@@ -217,7 +221,7 @@ does not accept `language_code`, so the adapter omits that hint. Only MP3 output
 formats are accepted: `mp3_22050_32` and `mp3_44100_32/64/96/128/192` (each bitrate is
 a separate value, for example `mp3_44100_64`). Higher-bitrate formats may require a
 different ElevenLabs subscription. Model, voice, format, and limits are configured
-through environment variables; there is no TTS submenu in `/settings`.
+through environment variables; `/settings` controls only TTS delivery.
 
 Generation runs directly with asynchronous I/O, bounded by 45 seconds overall and
 10 MiB of audio. Uploads have a separate 60-second timeout. You can keep chatting or
@@ -228,7 +232,7 @@ SQLite records the command before contacting ElevenLabs. Repeated delivery of th
 same Telegram message is ignored, including after a restart or `/reset`. A fresh
 command is required to retry a failed or interrupted request. There is no automatic
 generation retry or restart recovery. If upload confirmation is lost, check the chat
-before retrying because Telegram may already have received the voice message.
+before retrying because Telegram may already have received the audio.
 
 Audio bytes stay in memory only. Command outcomes are stored outside chat context;
 structured logs record timing, size, model, voice, and Telegram delivery identifiers.

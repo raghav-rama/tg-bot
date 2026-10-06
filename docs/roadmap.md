@@ -48,7 +48,7 @@ This document separates the current repo state from the planned delivery phases.
 
 As of `2026-09-19`, this repository contains the completed Phase 1 foundation, the completed Phase 1.5 Telegram draft-streaming work, the completed Phase 2 image-generation slice, the completed Phase 3 video-generation slice, the completed Phase 4 hardening and expansion work, and the completed Phase 6 Fal video provider support merged into `dev`. Phase 5 ElevenLabs Hindi text-to-speech is implemented in its isolated worktree and remains in progress pending live acceptance.
 
-- `/tts <text>` directly synthesizes speech with the official ElevenLabs Python SDK and sends an MP3 Telegram voice message. It uses independent asynchronous requests, command-history deduplication, and transient audio without a generation-job queue or database migration.
+- `/tts <text>` directly synthesizes speech with the official ElevenLabs Python SDK and sends an MP3 Telegram audio attachment by default, with an optional voice message selected through `/settings` → TTS delivery (saved per chat/user). It uses independent asynchronous requests, command-history deduplication, and transient audio without a generation-job queue or database migration.
 
 - Application code exists under `app/` for FastAPI startup, Telegram runtime wiring, SQLite persistence, domain services, OpenAI chat, Gemini image plus video generation, and optional Runpod/Fal video providers.
 - A polling-first runtime exists, and webhook mode now reuses the same shared processing path when enabled.
@@ -314,15 +314,15 @@ Let an allowed user send Hindi text through `/tts <text>` and receive generated 
 - speech generation through the official ElevenLabs Python SDK and text-to-speech API
 - default to the ElevenLabs voice ID `vIdhHAZdn1bGjKe1dFw8`
 - start with Hindi text only
-- deliver the generated speech through Telegram `sendVoice`
+- deliver the generated MP3 through Telegram `sendAudio` by default, with optional `sendVoice` delivery selected in `/settings`
 - keep generated audio bytes transient and out of SQLite
 - persist command and outcome rows, plus lightweight delivery/provider identifiers; keep richer delivery metadata in structured logs
 
 ### Design Notes
 
-- `/tts` directly awaits asynchronous synthesis and voice delivery without a persisted generation job. Both `/image` and `/video` use queued jobs; TTS is an independent request path.
+- `/tts` directly awaits asynchronous synthesis and speech delivery without a persisted generation job. Both `/image` and `/video` use queued jobs; TTS is an independent request path.
 - Keep OpenAI chat, Vertex image/video generation, and ElevenLabs speech generation as separate provider interfaces.
-- Prefer Telegram voice-message delivery for the first milestone. If ElevenLabs output is MP3, current Telegram and aiogram behavior still supports sending it as a voice message; if an OGG/Opus output is selected later, verify the container and codec against Telegram before making it the default.
+- The approved delivery update on `2026-10-06` defaults to MP3 audio attachments. `/settings` → TTS delivery selects MP3 audio file or voice message; the preference is saved per chat/user and captured before synthesis. Deployment and live acceptance of this update are pending.
 - Use `eleven_multilingual_v2` as the initial quality-first model for Hindi unless latency or cost requires a switch to a faster model.
 - Omit `language_code`: the default Multilingual v2 model supports Hindi but does not support this API parameter.
 - Keep the first input contract simple: the text after `/tts` is the speech text. Do not mix `/tts` with chat-history rewriting, prompt expansion, or translation in the first milestone.
@@ -340,7 +340,7 @@ Let an allowed user send Hindi text through `/tts <text>` and receive generated 
 
 Phase 5 is done when:
 
-- an allowed user can send `/tts <Hindi text>` and receive a playable Telegram voice message
+- an allowed user can send `/tts <Hindi text>` and receive a playable MP3 audio attachment or voice message according to the saved delivery setting
 - `/tts` with missing text returns a clear usage message
 - ElevenLabs failures return a clear user-safe retry message
 - generated audio bytes are not persisted in SQLite

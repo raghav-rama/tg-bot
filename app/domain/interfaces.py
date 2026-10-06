@@ -6,9 +6,10 @@ from app.domain.models import (
     GeneratedImageResult,
     GeneratedSpeechResult,
     GeneratedVideoResult,
+    SentAudio,
     SentPhoto,
-    SentVoice,
     SentVideo,
+    SentVoice,
     SettingsMenu,
 )
 
@@ -35,6 +36,11 @@ class ResponseEmitter(Protocol):
 
     async def send_video(self, video: GeneratedVideoResult) -> SentVideo:
         """Deliver a generated video reply."""
+
+    async def send_audio(
+        self, speech: GeneratedSpeechResult, *, reply_to_message_id: int,
+    ) -> SentAudio:
+        """Deliver generated speech as an MP3 audio reply to its source command."""
 
     async def send_voice(
         self, speech: GeneratedSpeechResult, *, reply_to_message_id: int,

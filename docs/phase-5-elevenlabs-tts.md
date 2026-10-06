@@ -4,12 +4,14 @@ Status: implemented in `phase-5-elevenlabs-tts`; live acceptance pending.
 
 ## Approved design
 
-- `/tts <text>` synthesizes the supplied text and delivers one MP3 voice message.
+- `/tts <text>` synthesizes the supplied text and delivers one MP3 audio attachment by default. `/settings` → TTS delivery
+  selects MP3 audio file or voice message, persisted per chat/user across resets
+  and restarts. The choice is captured before generation for each request.
 - Hindi is the supported target; mixed scripts are accepted without rewriting,
   translation, truncation, or chat-history context.
 - Use a separate asynchronous ElevenLabs provider and a focused TTS domain service.
 - Each accepted request finishes independently of chat supersession. Multiple TTS
-  commands may run concurrently; each voice replies to its originating command.
+  commands may run concurrently; each audio reply targets its originating command.
 - Use the official Python SDK, `eleven_multilingual_v2`, voice
   `vIdhHAZdn1bGjKe1dFw8`, and `mp3_44100_128`. Omit `language_code` for Multilingual
   v2 because the API does not support it for that model.
@@ -33,7 +35,7 @@ Status: implemented in `phase-5-elevenlabs-tts`; live acceptance pending.
 - [ ] Manual configured `/tts नमस्ते, आपका स्वागत है।` acceptance in Telegram.
 
 The approved in-chat plan is the implementation specification. Shared contracts
-are the speech request/result, `ResponseEmitter.send_voice`, optional provider
+are the speech request/result, `ResponseEmitter.send_audio` and `send_voice`, optional provider
 injection, and message-history claim. Existing chat/image/video provider contracts
 and the generation-job schema remain unchanged.
 
@@ -80,3 +82,16 @@ assistant message fields and structured logs; no schema migration is required.
 - [Official Python SDK](https://github.com/elevenlabs/elevenlabs-python)
 - [Telegram sendVoice](https://core.telegram.org/bots/api#sendvoice)
 - [aiogram uploads](https://docs.aiogram.dev/en/latest/api/upload_file.html)
+
+## Delivery update - 2026-10-06
+
+- MP3 audio attachments use Telegram `sendAudio` and its returned audio metadata;
+  optional voice messages use `sendVoice` and voice metadata.
+- `/settings` exposes only delivery style; provider model, voice, encoding, and
+  limits remain environment-only. Existing SQLite preferences need no migration.
+- Both delivery modes retain command deduplication, independent request lifecycles,
+  transient audio, and safe handling of upload and metadata failures.
+- `TELEGRAM_VOICE_REQUEST_TIMEOUT_SECONDS` applies to both speech upload styles.
+- Deployment and live Telegram acceptance of the new audio attachment path are pending.
+
+Reference: [Telegram sendAudio](https://core.telegram.org/bots/api#sendaudio).

@@ -29,14 +29,16 @@ Active worktrees:
 
 ## Current State
 
+- Local implementation update on `2026-10-06`: `/tts` delivery defaults to an MP3 audio attachment, with a saved voice-message option in `/settings`. Deployment and live Telegram acceptance of this delivery change are pending.
+
 - Runtime update on `2026-09-30`: Railway dev and production deploy the merged TTS implementation, and the user confirmed live Telegram `/tts` playback. Both environments now override `ELEVENLABS_TTS_MODEL=eleven_v4`; the checked-in default remains `eleven_multilingual_v2`. A live Hindi v4 request succeeded through the existing SDK adapter with the current voice and MP3 format. Plain-text command inputs remain unchanged; v4 additionally interprets audio tags and does not support SSML. Both Railway environments override `BOT_TTS_MAX_CHARS=10000` and `ELEVENLABS_TTS_TIMEOUT_SECONDS=180`; checked-in defaults remain 3000 characters and 45 seconds. Long scripts must be sent as separate `/tts` commands within Telegram's 4096-character message limit (4091 characters after the `/tts ` prefix); messages are not automatically joined.
 
 As of `2026-09-19`, Phase 1, Phase 1.5, Phase 2, Phase 3, Phase 4, and Phase 6 are accepted as complete. Phase 5 is implemented in its worktree and remains `in_progress` until live Telegram acceptance.
 
-- `/tts <text>` now generates MP3 speech with the official ElevenLabs Python SDK and delivers it via Telegram `sendVoice`, replying to the originating command.
+- `/tts <text>` now generates MP3 speech with the official ElevenLabs Python SDK and delivers it via Telegram `sendAudio` by default, replying to the originating command. `/settings` → TTS delivery switches between MP3 audio file and `sendVoice`; the choice is persisted per chat/user and survives resets and restarts.
 - TTS defaults are voice `vIdhHAZdn1bGjKe1dFw8`, model `eleven_multilingual_v2`, format `mp3_44100_128`, 3000 characters, 45-second total generation timeout, and 60-second upload timeout; audio is limited to 10 MiB and remains transient.
 - Hindi is the documented target; mixed scripts are accepted. The supplied text is not rewritten, translated, or combined with chat history. Multilingual v2 does not support `language_code`, so the adapter omits that hint.
-- TTS is optional (`ELEVENLABS_API_KEY`); `/start`, `/help`, and `/status` expose it. Model, voice, output format, and limits are environment-only, with no `/settings` TTS menu.
+- TTS is optional (`ELEVENLABS_API_KEY`); `/start`, `/help`, and `/status` expose it. Model, voice, output format, and limits are environment-only, while `/settings` exposes only MP3 audio file versus voice-message delivery.
 - TTS has an independent request lifecycle and survives newer messages and `/reset`. Atomic command-history claims prevent duplicate generation across redelivery, resets, and restarts; interrupted requests require a fresh command.
 - TTS command/outcome rows are excluded from OpenAI context. Structured logs contain provider and delivery metadata, never speech text or audio bytes. Upload failure never automatically regenerates speech; metadata failure after delivery never falsely reports upload failure.
 - Hermetic provider and ingestion tests use the actual ElevenLabs SDK with mocked HTTP and Telegram calls. Live Hindi pronunciation/playability acceptance remains pending.
@@ -98,7 +100,7 @@ If an unofficial tutorial conflicts with these sources, trust the official Teleg
 - Keep Telegram-specific logic separate from domain and provider logic.
 - Prefer polling-first implementation, while preserving a clean webhook path.
 - Treat text and single-image messages as the only supported v1 inputs unless the docs in this repo are updated.
-- Treat text replies, `/settings` inline-keyboard messages, `/image` generated images, `/video` generated videos, and `/tts` voice messages as the supported outputs. Voice inputs/transcription remain unsupported.
+- Treat text replies, `/settings` inline-keyboard messages, `/image` generated images, `/video` generated videos, and `/tts` MP3 audio or voice messages as the supported outputs. Voice inputs/transcription remain unsupported.
 - Keep the bot private via an allowlist unless requirements change.
 - Do not treat roadmap items as implementation requirements until their phase becomes active in `docs/roadmap.md`.
 - Use tavily fetching up-to-date info about anything.

@@ -28,7 +28,8 @@ def payload(text, message_id=1):
 
 
 @pytest.mark.parametrize("mode", ["webhook", "polling"])
-def test_tts_full_ingestion_sdk_upload_and_shutdown(monkeypatch, tmp_path, mode):
+@pytest.mark.parametrize("delivery", ["audio", "voice"])
+def test_tts_full_ingestion_sdk_upload_and_shutdown(monkeypatch, tmp_path, mode, delivery):
     requests, uploads, texts, clients = [], [], [], []
 
     def handle(request):
@@ -51,7 +52,7 @@ def test_tts_full_ingestion_sdk_upload_and_shutdown(monkeypatch, tmp_path, mode)
         uploads.append(kwargs)
         return Message.model_validate({
             "message_id": 90, "date": 1776000000, "chat": {"id": 123, "type": "private"},
-            "voice": {"file_id": "file", "file_unique_id": "unique", "duration": 3,
+            delivery: {"file_id": "file", "file_unique_id": "unique", "duration": 3,
                       "mime_type": "audio/mpeg", "file_size": 9},
         })
 
@@ -61,7 +62,7 @@ def test_tts_full_ingestion_sdk_upload_and_shutdown(monkeypatch, tmp_path, mode)
     monkeypatch.setattr(main_module, "ElevenLabsProvider", provider_factory)
     monkeypatch.setattr(TelegramRuntime, "configure_webhook", configure)
     monkeypatch.setattr(TelegramRuntime, "start", start)
-    monkeypatch.setattr(Bot, "send_voice", voice)
+    monkeypatch.setattr(Bot, f"send_{delivery}", voice)
     monkeypatch.setattr(Bot, "send_message", text)
     settings = build_settings(
         tmp_path / "bot.db", TELEGRAM_BOT_TOKEN="123456:TESTTokenValue", APP_UPDATE_MODE=mode,
@@ -84,11 +85,18 @@ def test_tts_full_ingestion_sdk_upload_and_shutdown(monkeypatch, tmp_path, mode)
                 update = Update.model_validate(body, context={"bot": runtime.bot})
                 client.portal.call(runtime.feed_update, update)
 
+        if delivery == "voice":
+            selected = client.portal.call(
+                lambda: client.app.state.container.chat_service.handle_settings_callback(
+                    chat_id=123, user_id=42, callback_data="prefs:tts_delivery:voice",
+                )
+            )
+            assert not selected.error_type
         feed(payload("/tts@testbot नमस्ते"))
         feed(payload("/tts@testbot नमस्ते"))
         assert len(requests) == 1 and len(uploads) == 1
         assert uploads[0]["request_timeout"] == 19
-        assert uploads[0]["voice"].data == b"ID3speech"
+        assert uploads[0][delivery].data == b"ID3speech"
         assert requests[0].url.path.endswith("/chosen-voice")
         assert requests[0].url.params["output_format"] == "mp3_22050_32"
         assert json.loads(requests[0].content)["model_id"] == "eleven_flash_v2_5"
@@ -99,6 +107,12 @@ def test_tts_full_ingestion_sdk_upload_and_shutdown(monkeypatch, tmp_path, mode)
         assert "speech generation: enabled" in texts[-1].lower()
         assert "eleven_flash_v2_5" in texts[-1]
         assert "test-speech-key" not in texts[-1]
+    # A fresh app and SQLite connection must retain the selected delivery mode.
+    with TestClient(main_module.create_app(settings)) as client:
+        runtime = client.app.state.container.telegram_runtime
+        feed(payload("/tts नमस्ते", message_id=4))
+        assert len(requests) == 2 and len(uploads) == 2
+        assert uploads[-1][delivery].data == b"ID3speech"
     assert clients and all(client.is_closed for client in clients)
 
 
